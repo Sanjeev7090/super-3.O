@@ -1,0 +1,1683 @@
+import React, { useEffect, useRef, useState, useCallback } from 'react';
+import axios from 'axios';
+import { createChart } from 'lightweight-charts';
+import { ChartLine, TrendUp, TrendDown, PencilLine, Trash, Lightning, ArrowsOut, ArrowsIn } from '@phosphor-icons/react';
+import GrowwTradeModal from './GrowwTradeModal';
+import StrategyOverlay from './StrategyOverlay';
+import TimeframeLevels from './TimeframeLevels';
+import { useTheme } from '../context/ThemeContext';
+
+const API = `${process.env.REACT_APP_BACKEND_URL}/api`;
+const VP_WIDTH  = 100;   // 84px bars + 6px gap + 10px heatmap
+const VP_BARS_W = 84;    // actual bar area width
+const HEAT_X    = 90;    // heatmap column start
+const HEAT_W    = 10;    // heatmap column width
+
+const fmtVol = n => {
+  if (!n && n !== 0) return '0';
+  const v = Math.abs(n);
+  if (v > 1e7) return `${(n/1e7).toFixed(1)}Cr`;
+  if (v > 1e5) return `${(n/1e5).toFixed(1)}L`;
+  if (v > 1e3) return `${(n/1e3).toFixed(1)}K`;
+  return Number(n).toFixed(0);
+};
+
+// ── SMC Auto Mark: compute FVG / Liquidity / Order Blocks ─────────
+function computeSMCData(bars) {
+  const n = bars.length;
+  const empty = { fvgs: [], swings: [], obs: [], bosChoch: [], pdZone: null,
+    supplyZones: [], demandZones: [], wyckoffPhases: [], manipulations: [], refinedEntries: [] };
+  if (n < 15) return empty;
+
+  // ── ATR-14 (needed for all pattern strength checks) ───────────
+  const atrArr = [];
+  for (let i = 1; i < n; i++) {
+    atrArr.push(Math.max(
+      bars[i].high - bars[i].low,
+      Math.abs(bars[i].high - bars[i - 1].close),
+      Math.abs(bars[i].low  - bars[i - 1].close)
+    ));
+  }
+  const atr14 = atrArr.length >= 14
+    ? atrArr.slice(-14).reduce((a, b) => a + b, 0) / 14
+    : (atrArr.reduce((a, b) => a + b, 0) / (atrArr.length || 1));
+
+  // ── FVG detection ─────────────────────────────────────────────
+  const fvgs = [];
+  const obs  = [];
+  for (let i = 2; i < n; i++) {
+    if (bars[i].low > bars[i - 2].high) {
+      const endIdx = Math.min(i + 20, n - 1);
+      let mit = false;
+      for (let j = i + 1; j <= endIdx; j++) {
+        if (bars[j].low < bars[i].low && bars[j].high > bars[i - 2].high) { mit = true; break; }
+      }
+      fvgs.push({ type: 'bull', top: bars[i].low, bottom: bars[i - 2].high, mitigated: mit,
+        startTime: bars[i - 1].timestamp / 1000, endTime: bars[endIdx].timestamp / 1000 });
+      if (bars[i].close > bars[i].open)
+        obs.push({ type: 'bull', high: bars[i - 1].high, low: bars[i - 1].low,
+          startTime: bars[i - 1].timestamp / 1000, endTime: bars[i].timestamp / 1000 });
+    }
+    if (bars[i].high < bars[i - 2].low) {
+      const endIdx = Math.min(i + 20, n - 1);
+      let mit = false;
+      for (let j = i + 1; j <= endIdx; j++) {
+        if (bars[j].high > bars[i].high && bars[j].low < bars[i - 2].low) { mit = true; break; }
+      }
+      fvgs.push({ type: 'bear', top: bars[i - 2].low, bottom: bars[i].high, mitigated: mit,
+        startTime: bars[i - 1].timestamp / 1000, endTime: bars[endIdx].timestamp / 1000 });
+      if (bars[i].close < bars[i].open)
+        obs.push({ type: 'bear', high: bars[i - 1].high, low: bars[i - 1].low,
+          startTime: bars[i - 1].timestamp / 1000, endTime: bars[i].timestamp / 1000 });
+    }
+  }
+
+  // ── Swing H/L — pivot 5,5 ─────────────────────────────────────
+  const swings = [];
+  for (let i = 5; i < n - 5; i++) {
+    let isH = true, isL = true;
+    for (let j = i - 5; j <= i + 5; j++) {
+      if (j === i) continue;
+      if (bars[j].high >= bars[i].high) isH = false;
+      if (bars[j].low  <= bars[i].low)  isL = false;
+    }
+    const eIdx = Math.min(i + 50, n - 1);
+    if (isH) swings.push({ type: 'high', price: bars[i].high,
+      startTime: bars[i].timestamp / 1000, endTime: bars[eIdx].timestamp / 1000, barIdx: i });
+    if (isL) swings.push({ type: 'low',  price: bars[i].low,
+      startTime: bars[i].timestamp / 1000, endTime: bars[eIdx].timestamp / 1000, barIdx: i });
+  }
+
+  // ── BOS / CHoCH ───────────────────────────────────────────────
+  const sortedSwings = swings.slice().sort((a, b) => a.startTime - b.startTime);
+  const bosChoch = [];
+  if (sortedSwings.length >= 3) {
+    let trend = null;
+    const fHigh = sortedSwings.filter(s => s.type === 'high');
+    if (fHigh.length >= 2) trend = fHigh[1].price > fHigh[0].price ? 'up' : 'down';
+    for (let i = 1; i < sortedSwings.length; i++) {
+      const curr = sortedSwings[i];
+      if (curr.type === 'high') {
+        const ph = sortedSwings.slice(0, i).filter(s => s.type === 'high');
+        if (!ph.length) continue;
+        const prev = ph[ph.length - 1];
+        if (curr.price > prev.price) {
+          bosChoch.push({ kind: trend === 'up' ? 'bos_bull' : 'choch_bull', price: prev.price, eventTime: curr.startTime });
+          if (trend !== 'up') trend = 'up';
+        }
+      } else {
+        const pl = sortedSwings.slice(0, i).filter(s => s.type === 'low');
+        if (!pl.length) continue;
+        const prev = pl[pl.length - 1];
+        if (curr.price < prev.price) {
+          bosChoch.push({ kind: trend === 'down' ? 'bos_bear' : 'choch_bear', price: prev.price, eventTime: curr.startTime });
+          if (trend !== 'down') trend = 'down';
+        }
+      }
+    }
+  }
+
+  // ── Premium / Discount zone ───────────────────────────────────
+  const pdZone = (() => {
+    const recentH = [...swings].reverse().find(s => s.type === 'high');
+    const recentL = [...swings].reverse().find(s => s.type === 'low');
+    if (!recentH || !recentL) return null;
+    const hi = recentH.price, lo = recentL.price;
+    if (hi <= lo) return null;
+    return { hi, lo, eq: (hi + lo) / 2,
+      startTime: Math.min(recentH.startTime, recentL.startTime),
+      endTime:   Math.max(recentH.endTime,   recentL.endTime) };
+  })();
+
+  // ── Supply & Demand Zones (Drop-Base-Rally / Rally-Base-Drop) ──
+  const supplyZones = [], demandZones = [];
+  for (let i = 3; i < n - 1; i++) {
+    const bar      = bars[i];
+    const bodySize = Math.abs(bar.close - bar.open);
+    if (bodySize < atr14 * 1.0) continue; // filter weak candles
+
+    const baseStart = Math.max(0, i - 5);
+    const baseBars  = bars.slice(baseStart, i);
+    if (baseBars.length < 1) continue;
+
+    const baseHigh  = Math.max(...baseBars.map(b => b.high));
+    const baseLow   = Math.min(...baseBars.map(b => b.low));
+    const baseRange = baseHigh - baseLow;
+    if (baseRange > bodySize * 1.0) continue; // must be tight base
+
+    const endTime = bars[n - 1].timestamp / 1000;
+    const startTime = baseBars[0].timestamp / 1000;
+
+    if (bar.close > bar.open) { // Bullish impulse → Demand Zone
+      let mit = false;
+      for (let j = i + 1; j < n; j++) { if (bars[j].low < baseLow) { mit = true; break; } }
+      if (!mit) demandZones.push({ top: baseHigh, bottom: baseLow, startTime, endTime,
+        strength: Math.min(3, bodySize / atr14) });
+    } else { // Bearish impulse → Supply Zone
+      let mit = false;
+      for (let j = i + 1; j < n; j++) { if (bars[j].high > baseHigh) { mit = true; break; } }
+      if (!mit) supplyZones.push({ top: baseHigh, bottom: baseLow, startTime, endTime,
+        strength: Math.min(3, bodySize / atr14) });
+    }
+  }
+
+  // ── Wyckoff: Accumulation & Distribution ─────────────────────
+  const wyckoffPhases = [];
+  const winSize = Math.max(12, Math.min(20, Math.floor(n / 5)));
+  for (let s = 5; s < n - winSize; s += Math.max(3, Math.floor(winSize / 3))) {
+    const e    = Math.min(s + winSize, n - 1);
+    const win  = bars.slice(s, e + 1);
+    const wHi  = Math.max(...win.map(b => b.high));
+    const wLo  = Math.min(...win.map(b => b.low));
+    const wRng = wHi - wLo;
+    const avgR = win.reduce((acc, b) => acc + (b.high - b.low), 0) / win.length;
+    if (wRng > avgR * 7) continue; // not a tight range
+
+    const priorBars = bars.slice(Math.max(0, s - winSize), s);
+    if (priorBars.length < 4) continue;
+    const priorMove = priorBars[priorBars.length - 1].close - priorBars[0].close;
+
+    const afterBars = bars.slice(e + 1, Math.min(n, e + winSize));
+    const afterMove = afterBars.length > 2
+      ? afterBars[afterBars.length - 1].close - afterBars[0].close : 0;
+
+    const phase =
+      priorMove < -atr14 * 3 && (afterMove > atr14 * 2 || e >= n - 6) ? 'ACC' :
+      priorMove >  atr14 * 3 && (afterMove < -atr14 * 2 || e >= n - 6) ? 'DIST' : null;
+
+    if (phase) wyckoffPhases.push({ phase, top: wHi, bottom: wLo,
+      startTime: win[0].timestamp / 1000, endTime: win[win.length - 1].timestamp / 1000,
+      active: e >= n - 8 });
+  }
+  // Deduplicate
+  const dedupedWy = wyckoffPhases.filter((p, i) =>
+    !wyckoffPhases.some((q, j) => j < i && p.phase === q.phase &&
+      Math.abs(p.bottom - q.bottom) < (p.top - p.bottom) * 0.6)
+  ).slice(-4);
+
+  // ── Manipulation / Stop Hunt Detection ───────────────────────
+  const manipulations = [];
+  const swingLows   = swings.filter(s => s.type === 'low');
+  const swingHighs  = swings.filter(s => s.type === 'high');
+
+  const nearestBarIdx = (targetTime) => {
+    let best = -1, bestD = Infinity;
+    bars.forEach((b, i) => {
+      const d = Math.abs(b.timestamp / 1000 - targetTime);
+      if (d < bestD) { bestD = d; best = i; }
+    });
+    return bestD < 7200 ? best : -1; // within 2h
+  };
+
+  // Bullish hunt: sweep of swing low with close above
+  swingLows.slice(-10).forEach(sw => {
+    const swIdx = sw.barIdx ?? nearestBarIdx(sw.startTime);
+    if (swIdx < 0) return;
+    for (let i = swIdx + 1; i < Math.min(swIdx + 20, n); i++) {
+      if (bars[i].low < sw.price) {
+        if (bars[i].close > sw.price) {
+          const nextClose = bars[Math.min(i + 1, n - 1)].close;
+          const nearTgt   = swingHighs.length
+            ? Math.max(...swingHighs.slice(-3).map(s => s.price)) : bars[i].close * 1.015;
+          manipulations.push({ type: 'bull_hunt', sweepLevel: sw.price,
+            wickExtreme: bars[i].low, closeLevel: bars[i].close,
+            sl: bars[i].low, entryPrice: nextClose, targetPrice: nearTgt,
+            eventTime: bars[i].timestamp / 1000 });
+        }
+        break;
+      }
+    }
+  });
+
+  // Bearish hunt: sweep of swing high with close below
+  swingHighs.slice(-10).forEach(sw => {
+    const swIdx = sw.barIdx ?? nearestBarIdx(sw.startTime);
+    if (swIdx < 0) return;
+    for (let i = swIdx + 1; i < Math.min(swIdx + 20, n); i++) {
+      if (bars[i].high > sw.price) {
+        if (bars[i].close < sw.price) {
+          const nearTgt = swingLows.length
+            ? Math.min(...swingLows.slice(-3).map(s => s.price)) : bars[i].close * 0.985;
+          manipulations.push({ type: 'bear_hunt', sweepLevel: sw.price,
+            wickExtreme: bars[i].high, closeLevel: bars[i].close,
+            sl: bars[i].high, entryPrice: bars[Math.min(i + 1, n - 1)].close,
+            targetPrice: nearTgt, eventTime: bars[i].timestamp / 1000 });
+        }
+        break;
+      }
+    }
+  });
+
+  // ── Refined Entry Zones (from CHoCH + nearest OB) ────────────
+  const refinedEntries = [];
+  (bosChoch || []).filter(ev => ev.kind.includes('choch')).slice(-3).forEach(ev => {
+    const isBull = ev.kind.includes('bull');
+    const relOBs = obs.filter(ob => ob.type === (isBull ? 'bull' : 'bear'));
+    const nearOB = relOBs[relOBs.length - 1];
+    const entryHigh = nearOB ? nearOB.high : ev.price * 1.001;
+    const entryLow  = nearOB ? nearOB.low  : ev.price * 0.999;
+    const relSwings = isBull
+      ? swingLows.filter(s => s.startTime < ev.eventTime)
+      : swingHighs.filter(s => s.startTime < ev.eventTime);
+    const lastSw = relSwings[relSwings.length - 1];
+    const slLevel = lastSw
+      ? (isBull ? lastSw.price * 0.9985 : lastSw.price * 1.0015)
+      : (isBull ? ev.price * 0.990 : ev.price * 1.010);
+    const tgtSwings = isBull
+      ? swingHighs.filter(s => s.price > entryHigh)
+      : swingLows.filter(s => s.price < entryLow);
+    refinedEntries.push({ direction: isBull ? 'bull' : 'bear',
+      entryHigh, entryLow, slLevel,
+      target: tgtSwings[0]?.price ?? null,
+      eventTime: ev.eventTime, level: ev.price });
+  });
+
+  return {
+    fvgs:           fvgs.filter(f => !f.mitigated).slice(-40),
+    swings:         swings.slice(-40),
+    obs:            obs.slice(-20),
+    bosChoch:       bosChoch.slice(-20),
+    pdZone,
+    supplyZones:    supplyZones.slice(-6),
+    demandZones:    demandZones.slice(-6),
+    wyckoffPhases:  dedupedWy,
+    manipulations:  manipulations.slice(-6),
+    refinedEntries: refinedEntries.slice(-3),
+  };
+}
+
+const ChartPanel = ({
+  stockData, loading, selectedStock, onPivotSelect, pivotPoint, gannFan,
+  semiLogScale, setSemiLogScale, timeframe, onTimeframeChange, isCrypto,
+  dataSource, onDataSourceChange, activeStrategy, strategyData, tradeSignal
+}) => {
+  const chartContainerRef = useRef();
+  const chartRef = useRef(null);
+  const candlestickSeriesRef = useRef(null);
+  const gannLineSeriesRef = useRef([]);
+  // Volume Profile refs
+  const vpCanvasRef = useRef(null);
+  const vpDataRef = useRef(null);
+  const vpAnimRef = useRef(null);
+  const vpPriceLinesRef = useRef([]);
+  const vpHoverYRef = useRef(null);
+  // SMC Auto Mark refs
+  const smcCanvasRef = useRef(null);
+  const smcDataRef   = useRef(null);
+  const smcAnimRef   = useRef(null);
+  // Trade Signal (Parity Scanner) price lines
+  const tradeSignalLinesRef = useRef([]);
+  const [smcActive, setSmcActive] = useState(true);
+  const [isFullscreen, setIsFullscreen] = useState(false);
+  const [selectMode, setSelectMode] = useState(null);
+  const [showGannLines, setShowGannLines] = useState(true);
+  const [lineExtension, setLineExtension] = useState(50);
+  const [isMovingMode, setIsMovingMode] = useState(false);
+  const [tfOpen, setTfOpen] = useState(false);
+  const tfDropdownRef = useRef(null);
+  const tfBtnRef = useRef(null);
+  const [tfDropdownPos, setTfDropdownPos] = useState({ top: 0, left: 0 });
+  const [showTrade, setShowTrade] = useState(false);
+  const [vpActive, setVpActive] = useState(false);
+  const [vpTooltip, setVpTooltip] = useState(null);
+  const { theme } = useTheme();
+
+  const TF_GROUPS = [
+    { group: 'MINUTES', items: [
+      { multiplier: 1,  timespan: 'minute', label: '1MIN', displayName: '1 minute'   },
+      { multiplier: 2,  timespan: 'minute', label: '2M',   displayName: '2 minutes'  },
+      { multiplier: 3,  timespan: 'minute', label: '3M',   displayName: '3 minutes'  },
+      { multiplier: 5,  timespan: 'minute', label: '5M',   displayName: '5 minutes'  },
+      { multiplier: 10, timespan: 'minute', label: '10M',  displayName: '10 minutes' },
+      { multiplier: 15, timespan: 'minute', label: '15M',  displayName: '15 minutes' },
+      { multiplier: 30, timespan: 'minute', label: '30M',  displayName: '30 minutes' },
+      { multiplier: 45, timespan: 'minute', label: '45M',  displayName: '45 minutes' },
+    ]},
+    { group: 'HOURS', items: [
+      { multiplier: 1, timespan: 'hour', label: '1H',  displayName: '1 hour'  },
+      { multiplier: 2, timespan: 'hour', label: '2H',  displayName: '2 hours' },
+      { multiplier: 4, timespan: 'hour', label: '4H',  displayName: '4 hours' },
+    ]},
+    { group: 'DAYS', items: [
+      { multiplier: 1, timespan: 'day', label: '1D', displayName: '1 day' },
+    ]},
+    { group: 'WEEKS', items: [
+      { multiplier: 1, timespan: 'week', label: '1W', displayName: '1 week' },
+    ]},
+    { group: 'MONTHS', items: [
+      { multiplier: 1, timespan: 'day', label: '1MO', displayName: '1 month',  days: 30  },
+      { multiplier: 3, timespan: 'day', label: '3MO', displayName: '3 months', days: 90  },
+      { multiplier: 6, timespan: 'day', label: '6MO', displayName: '6 months', days: 180 },
+    ]},
+    { group: 'YEARS', items: [
+      { multiplier: 1, timespan: 'week', label: '1Y', displayName: '1 year', days: 365 },
+    ]},
+  ];
+
+  const clearGannLines = () => {
+    if (chartRef.current && gannLineSeriesRef.current.length > 0) {
+      gannLineSeriesRef.current.forEach(series => {
+        try { chartRef.current.removeSeries(series); } catch (e) {}
+      });
+      gannLineSeriesRef.current = [];
+    }
+  };
+
+  // ── Volume Profile helpers ───────────────────────────────────────
+  const clearVPLines = useCallback(() => {
+    vpPriceLinesRef.current.forEach(pl => {
+      try { candlestickSeriesRef.current?.removePriceLine(pl); } catch (e) {}
+    });
+    vpPriceLinesRef.current = [];
+  }, []);
+
+  const drawVPCanvas = useCallback(() => {
+    const canvas = vpCanvasRef.current;
+    const series = candlestickSeriesRef.current;
+    const d = vpDataRef.current;
+    if (!canvas || !series || !d?.vp_bins?.length) return;
+    const container = chartContainerRef.current;
+    if (!container) return;
+    const dpr = window.devicePixelRatio || 1;
+    const H = container.clientHeight;
+    if (canvas.style.height !== `${H}px`) {
+      canvas.width = VP_WIDTH * dpr;
+      canvas.height = H * dpr;
+      canvas.style.width = `${VP_WIDTH}px`;
+      canvas.style.height = `${H}px`;
+    }
+    const ctx = canvas.getContext('2d');
+    ctx.save();
+    ctx.scale(dpr, dpr);
+    ctx.clearRect(0, 0, VP_WIDTH, H);
+
+    const bins    = d.vp_bins;
+    const maxVol  = Math.max(...bins.map(b => b.total_vol)) || 1;
+    const rowH    = Math.max(3, (H / bins.length) * 0.72);
+    const pocPrice = bins.find(b => b.is_poc)?.price_mid ?? bins[Math.floor(bins.length / 2)].price_mid;
+    const maxDist  = Math.max(...bins.map(b => Math.abs(b.price_mid - pocPrice))) || 1;
+
+    // ── 1. Buy / Sell bars ─────────────────────────────────────────
+    bins.forEach(bin => {
+      const y = series.priceToCoordinate(bin.price_mid);
+      if (y == null || y < -rowH || y > H + rowH) return;
+      const buyW  = (bin.buy_vol  / maxVol) * VP_BARS_W;
+      const sellW = (bin.sell_vol / maxVol) * VP_BARS_W;
+      const half  = rowH / 2;
+
+      if (bin.in_value_area) {
+        ctx.fillStyle = 'rgba(255,255,255,0.04)';
+        ctx.fillRect(0, y - rowH, VP_BARS_W + 4, rowH * 2);
+      }
+      if (buyW > 0) {
+        ctx.fillStyle = bin.in_value_area ? 'rgba(0,230,118,0.82)' : 'rgba(0,230,118,0.38)';
+        ctx.fillRect(1, y - half, buyW, half);
+      }
+      if (sellW > 0) {
+        ctx.fillStyle = bin.in_value_area ? 'rgba(255,59,48,0.82)' : 'rgba(255,59,48,0.38)';
+        ctx.fillRect(1, y, sellW, half);
+      }
+      if (bin.is_poc) {
+        ctx.strokeStyle = 'rgba(255,107,0,0.95)';
+        ctx.lineWidth = 1.5;
+        ctx.setLineDash([3, 2]);
+        ctx.beginPath(); ctx.moveTo(0, y); ctx.lineTo(VP_BARS_W + 4, y); ctx.stroke();
+        ctx.setLineDash([]);
+        ctx.fillStyle = '#FF6B00';
+        ctx.font = 'bold 7px monospace';
+        ctx.fillText('◆', VP_BARS_W - 10, y - 2);
+      }
+    });
+
+    // ── 2. VAH / VAL edge labels ───────────────────────────────────
+    const markEdgeLabel = (price, label, color) => {
+      if (!price) return;
+      const y = series.priceToCoordinate(price);
+      if (y == null || y < 4 || y > H - 4) return;
+      ctx.fillStyle = color;
+      ctx.font = 'bold 7px monospace';
+      ctx.fillText(label, 2, y - 2);
+    };
+    markEdgeLabel(d.vah_price, 'VAH', '#A855F7');
+    markEdgeLabel(d.val_price, 'VAL', '#06B6D4');
+
+    // ── 3. Heatmap column — per-level Buy/Sell split ──────────────
+    // Thin vertical separator
+    ctx.strokeStyle = 'rgba(255,255,255,0.06)';
+    ctx.lineWidth = 0.5;
+    ctx.setLineDash([]);
+    ctx.beginPath(); ctx.moveTo(HEAT_X - 2, 0); ctx.lineTo(HEAT_X - 2, H); ctx.stroke();
+
+    bins.forEach(bin => {
+      const y = series.priceToCoordinate(bin.price_mid);
+      if (y == null || y < -rowH || y > H + rowH) return;
+
+      const totalVol    = (bin.buy_vol || 0) + (bin.sell_vol || 0) || 1;
+      const buyRatio    = bin.buy_vol  / totalVol;   // 0-1
+      const sellRatio   = bin.sell_vol / totalVol;   // 0-1
+      // Brightness: louder levels = more opaque
+      const intensity   = 0.30 + (bin.total_vol / maxVol) * 0.70;
+      // POC zone gets full brightness
+      const alpha       = bin.is_poc ? 1.0 : intensity;
+
+      const half = rowH;   // each cell spans rowH above + rowH below y
+
+      // TOP half → Buy (green), width proportional to buy ratio
+      const buyPixW  = Math.max(1, HEAT_W * buyRatio);
+      const sellPixW = Math.max(1, HEAT_W * sellRatio);
+
+      // Background fill (dark base)
+      ctx.fillStyle = 'rgba(10,10,20,0.55)';
+      ctx.fillRect(HEAT_X, y - half, HEAT_W, half * 2);
+
+      // Buy bar — top half of cell
+      ctx.fillStyle = `rgba(0,230,118,${alpha})`;
+      ctx.fillRect(HEAT_X, y - half, buyPixW, half);
+
+      // Sell bar — bottom half of cell
+      ctx.fillStyle = `rgba(255,59,48,${alpha})`;
+      ctx.fillRect(HEAT_X, y, sellPixW, half);
+
+      // Thin mid-line separator between buy/sell
+      ctx.fillStyle = 'rgba(0,0,0,0.4)';
+      ctx.fillRect(HEAT_X, y - 0.5, HEAT_W, 1);
+
+      // Dominant side indicator: bright edge glow
+      const dominant = buyRatio > sellRatio ? 'buy' : sellRatio > buyRatio ? 'sell' : null;
+      if (dominant && bin.total_vol / maxVol > 0.3) {
+        ctx.fillStyle = dominant === 'buy'
+          ? `rgba(0,230,118,${alpha * 0.6})`
+          : `rgba(255,59,48,${alpha * 0.6})`;
+        // Right-edge glow strip (1px)
+        ctx.fillRect(HEAT_X + HEAT_W - 1, y - half, 1, half * 2);
+      }
+
+      // POC band — white-hot line + label
+      if (bin.is_poc) {
+        ctx.fillStyle = 'rgba(255,230,150,0.95)';
+        ctx.fillRect(HEAT_X, y - 1, HEAT_W, 2);
+        ctx.fillStyle = '#FF6B00';
+        ctx.font = 'bold 6px monospace';
+        ctx.fillText('H', HEAT_X + 2, y - 3);
+      }
+    });
+
+    // ── 4. Hover highlight ────────────────────────────────────────
+    const hoverY = vpHoverYRef.current;
+    if (hoverY !== null) {
+      let hBin = null, hMin = Infinity;
+      bins.forEach(bin => {
+        const y = series.priceToCoordinate(bin.price_mid);
+        if (y == null) return;
+        const dist = Math.abs(y - hoverY);
+        if (dist < hMin) { hMin = dist; hBin = bin; }
+      });
+      if (hBin && hMin < rowH * 1.5) {
+        const hy = series.priceToCoordinate(hBin.price_mid);
+        if (hy != null) {
+          ctx.fillStyle = 'rgba(255,255,255,0.10)';
+          ctx.fillRect(0, hy - rowH, VP_WIDTH, rowH * 2);
+          ctx.strokeStyle = 'rgba(255,255,255,0.35)';
+          ctx.lineWidth = 0.5;
+          ctx.setLineDash([]);
+          ctx.beginPath(); ctx.moveTo(0, hy); ctx.lineTo(VP_WIDTH, hy); ctx.stroke();
+        }
+      }
+    }
+
+    ctx.restore();
+  }, []);
+
+  // ── SMC Canvas Draw ────────────────────────────────────────────
+  const drawSMCCanvas = useCallback(() => {
+    const canvas  = smcCanvasRef.current;
+    const chart   = chartRef.current;
+    const series  = candlestickSeriesRef.current;
+    const smc     = smcDataRef.current;
+    if (!canvas || !chart || !series || !smc) return;
+    const container = chartContainerRef.current;
+    if (!container) return;
+
+    const W = container.clientWidth;
+    const H = container.clientHeight;
+    const dpr = window.devicePixelRatio || 1;
+    if (canvas.width !== Math.round(W * dpr) || canvas.height !== Math.round(H * dpr)) {
+      canvas.width  = Math.round(W * dpr);
+      canvas.height = Math.round(H * dpr);
+      canvas.style.width  = `${W}px`;
+      canvas.style.height = `${H}px`;
+    }
+
+    const ctx = canvas.getContext('2d');
+    ctx.save();
+    ctx.scale(dpr, dpr);
+    ctx.clearRect(0, 0, W, H);
+
+    const ts  = chart.timeScale();
+    const toX = t  => { try { return ts.timeToCoordinate(t); } catch { return null; } };
+    const toY = p  => series.priceToCoordinate(p);
+
+    // ── 0a. Wyckoff Phases (ACC / DIST) — deepest background ──────
+    (smc.wyckoffPhases || []).forEach(phase => {
+      const x1  = toX(phase.startTime);
+      const x2  = toX(phase.endTime);
+      const yT  = toY(phase.top);
+      const yB  = toY(phase.bottom);
+      if (x1 == null || x2 == null || yT == null || yB == null) return;
+      const left = Math.min(x1, x2);
+      const top  = Math.min(yT, yB);
+      const w    = Math.max(20, Math.abs(x2 - x1));
+      const h    = Math.max(4, Math.abs(yT - yB));
+      const isAcc = phase.phase === 'ACC';
+      ctx.save();
+      ctx.fillStyle   = isAcc ? 'rgba(0,150,255,0.06)'   : 'rgba(200,50,200,0.06)';
+      ctx.strokeStyle = isAcc ? 'rgba(0,150,255,0.55)'   : 'rgba(200,50,200,0.55)';
+      ctx.lineWidth   = 1;
+      ctx.setLineDash([5, 4]);
+      ctx.fillRect(left, top, w, h);
+      ctx.strokeRect(left, top, w, h);
+      ctx.setLineDash([]);
+      ctx.fillStyle = isAcc ? 'rgba(0,190,255,0.90)' : 'rgba(220,100,220,0.90)';
+      ctx.font = 'bold 9px monospace';
+      ctx.fillText(isAcc ? '▲ ACCUM' : '▼ DIST', left + 4, top + 12);
+      if (phase.active) {
+        ctx.font = 'bold 7px monospace';
+        ctx.fillText('ACTIVE', left + 4, top + 23);
+      }
+      ctx.restore();
+    });
+
+    // ── 0b. Demand Zones (Support — green hatched boxes) ──────────
+    (smc.demandZones || []).forEach(zone => {
+      const x1 = toX(zone.startTime); const x2 = toX(zone.endTime);
+      const yT = toY(zone.top);       const yB = toY(zone.bottom);
+      if (x1 == null || yT == null || yB == null) return;
+      const left = Math.min(x1 ?? 0, x2 ?? W);
+      const top  = Math.min(yT, yB);
+      const w    = x2 != null ? Math.abs(x2 - x1) : W - left;
+      const h    = Math.max(3, Math.abs(yT - yB));
+      ctx.save();
+      ctx.fillStyle = 'rgba(0,230,118,0.08)';
+      ctx.fillRect(left, top, w, h);
+      ctx.strokeStyle = 'rgba(0,230,118,0.75)'; ctx.lineWidth = 1.5;
+      ctx.beginPath(); ctx.moveTo(left, top);     ctx.lineTo(left + w, top);     ctx.stroke();
+      ctx.beginPath(); ctx.moveTo(left, top + h); ctx.lineTo(left + w, top + h); ctx.stroke();
+      // diagonal hatch
+      ctx.strokeStyle = 'rgba(0,230,118,0.15)'; ctx.lineWidth = 0.7;
+      for (let hx = left - h; hx < left + w; hx += 7) {
+        ctx.beginPath(); ctx.moveTo(hx, top + h); ctx.lineTo(hx + h, top); ctx.stroke();
+      }
+      ctx.fillStyle = 'rgba(0,230,118,0.95)'; ctx.font = 'bold 8px monospace';
+      ctx.fillText(zone.strength >= 2 ? '★ DZ' : 'DZ', left + 3, top + h - 3);
+      ctx.restore();
+    });
+
+    // ── 0c. Supply Zones (Resistance — red hatched boxes) ─────────
+    (smc.supplyZones || []).forEach(zone => {
+      const x1 = toX(zone.startTime); const x2 = toX(zone.endTime);
+      const yT = toY(zone.top);       const yB = toY(zone.bottom);
+      if (x1 == null || yT == null || yB == null) return;
+      const left = Math.min(x1 ?? 0, x2 ?? W);
+      const top  = Math.min(yT, yB);
+      const w    = x2 != null ? Math.abs(x2 - x1) : W - left;
+      const h    = Math.max(3, Math.abs(yT - yB));
+      ctx.save();
+      ctx.fillStyle = 'rgba(255,59,48,0.08)';
+      ctx.fillRect(left, top, w, h);
+      ctx.strokeStyle = 'rgba(255,80,50,0.75)'; ctx.lineWidth = 1.5;
+      ctx.beginPath(); ctx.moveTo(left, top);     ctx.lineTo(left + w, top);     ctx.stroke();
+      ctx.beginPath(); ctx.moveTo(left, top + h); ctx.lineTo(left + w, top + h); ctx.stroke();
+      ctx.strokeStyle = 'rgba(255,80,50,0.15)'; ctx.lineWidth = 0.7;
+      for (let hx = left - h; hx < left + w; hx += 7) {
+        ctx.beginPath(); ctx.moveTo(hx, top); ctx.lineTo(hx + h, top + h); ctx.stroke();
+      }
+      ctx.fillStyle = 'rgba(255,100,50,0.95)'; ctx.font = 'bold 8px monospace';
+      ctx.fillText(zone.strength >= 2 ? '★ SZ' : 'SZ', left + 3, top + 9);
+      ctx.restore();
+    });
+
+    // ── 1. Liquidity lines (Swing High / Low) ─────────────────
+    smc.swings.forEach(sw => {
+      const x1 = toX(sw.startTime);
+      const x2 = toX(sw.endTime);
+      const y  = toY(sw.price);
+      if (x1 == null || x2 == null || y == null) return;
+      ctx.save();
+      ctx.strokeStyle = 'rgba(255,185,0,0.72)';
+      ctx.lineWidth = 1;
+      ctx.setLineDash([5, 4]);
+      ctx.beginPath(); ctx.moveTo(x1, y); ctx.lineTo(x2, y); ctx.stroke();
+      ctx.setLineDash([]);
+      ctx.fillStyle = 'rgba(255,185,0,0.85)';
+      ctx.font = 'bold 7px monospace';
+      const lbl = sw.type === 'high' ? 'LH' : 'LL';
+      ctx.fillText(lbl, Math.max(8, x1 - 14), y - 2);
+      ctx.restore();
+    });
+
+    // ── 2. FVG Boxes ──────────────────────────────────────────
+    smc.fvgs.forEach(fvg => {
+      const x1   = toX(fvg.startTime);
+      const x2   = toX(fvg.endTime);
+      const yTop = toY(fvg.top);
+      const yBot = toY(fvg.bottom);
+      if (x1 == null || x2 == null || yTop == null || yBot == null) return;
+      const left = Math.min(x1, x2);
+      const top  = Math.min(yTop, yBot);
+      const w    = Math.abs(x2 - x1);
+      const h    = Math.max(2, Math.abs(yBot - yTop));
+      ctx.save();
+      if (fvg.type === 'bull') {
+        ctx.fillStyle   = 'rgba(0,230,118,0.11)';
+        ctx.strokeStyle = 'rgba(0,230,118,0.85)';
+      } else {
+        ctx.fillStyle   = 'rgba(255,59,48,0.11)';
+        ctx.strokeStyle = 'rgba(255,59,48,0.85)';
+      }
+      ctx.lineWidth = 1;
+      ctx.fillRect(left, top, w, h);
+      ctx.strokeRect(left, top, w, h);
+      ctx.fillStyle = fvg.type === 'bull' ? 'rgba(0,230,118,0.92)' : 'rgba(255,59,48,0.92)';
+      ctx.font = 'bold 8px monospace';
+      ctx.fillText(fvg.type === 'bull' ? 'FVG+' : 'FVG-', left + 3, top + 9);
+      ctx.restore();
+    });
+
+    // ── 3. Order Blocks ────────────────────────────────────────
+    smc.obs.forEach(ob => {
+      const x1 = toX(ob.startTime);
+      const x2 = toX(ob.endTime);
+      const yH = toY(ob.high);
+      const yL = toY(ob.low);
+      if (x1 == null || x2 == null || yH == null || yL == null) return;
+      const left  = Math.min(x1, x2);
+      const top   = Math.min(yH, yL);
+      const w     = Math.max(6, Math.abs(x2 - x1));
+      const h     = Math.max(2, Math.abs(yL - yH));
+      ctx.save();
+      if (ob.type === 'bull') {
+        ctx.fillStyle   = 'rgba(59,130,246,0.18)';
+        ctx.strokeStyle = 'rgba(59,130,246,0.85)';
+      } else {
+        ctx.fillStyle   = 'rgba(255,100,0,0.18)';
+        ctx.strokeStyle = 'rgba(255,100,0,0.85)';
+      }
+      ctx.lineWidth = 1.5;
+      ctx.fillRect(left, top, w, h);
+      ctx.strokeRect(left, top, w, h);
+      ctx.fillStyle = ob.type === 'bull' ? 'rgba(59,130,246,0.9)' : 'rgba(255,100,0,0.9)';
+      ctx.font = 'bold 7px monospace';
+      ctx.fillText('OB', left + 2, top + 8);
+      ctx.restore();
+    });
+
+    // ── 4. BOS / CHoCH ────────────────────────────────────────────
+    (smc.bosChoch || []).forEach(ev => {
+      const xEv = toX(ev.eventTime);
+      const y   = toY(ev.price);
+      if (xEv == null || y == null) return;
+
+      const isBull  = ev.kind.includes('bull');
+      const isChoch = ev.kind.includes('choch');
+      const label   = isChoch ? 'CHoCH' : 'BOS';
+
+      // Color scheme
+      const clr =
+        ev.kind === 'bos_bull'   ? '#00E676' :
+        ev.kind === 'bos_bear'   ? '#FF3B30' :
+        ev.kind === 'choch_bull' ? '#00BFFF' :
+                                   '#FF6B00';
+
+      ctx.save();
+      ctx.strokeStyle = clr;
+      ctx.lineWidth   = isChoch ? 1.5 : 1;
+      ctx.setLineDash(isChoch ? [6, 3] : []);
+      ctx.globalAlpha = 0.80;
+
+      // Horizontal broken-level line (extends ±60px around break)
+      const x1 = Math.max(0, xEv - 80);
+      const x2 = xEv + 30;
+      ctx.beginPath(); ctx.moveTo(x1, y); ctx.lineTo(x2, y); ctx.stroke();
+      ctx.setLineDash([]);
+      ctx.globalAlpha = 1;
+
+      // Label pill
+      ctx.font = 'bold 8px monospace';
+      const tw = ctx.measureText(label).width + 8;
+      const th = 13;
+      const lx = xEv - tw - 4;
+      const ly = y - th / 2;
+
+      ctx.fillStyle = clr;
+      ctx.globalAlpha = 0.20;
+      ctx.fillRect(lx, ly, tw, th);
+      ctx.globalAlpha = 1;
+      ctx.lineWidth = 1;
+      ctx.strokeRect(lx, ly, tw, th);
+      ctx.fillStyle = clr;
+      ctx.fillText(label, lx + 4, ly + 9);
+
+      // Arrow at break point
+      ctx.beginPath();
+      if (isBull) {
+        ctx.moveTo(xEv, y + 4); ctx.lineTo(xEv - 4, y + 11); ctx.lineTo(xEv + 4, y + 11);
+      } else {
+        ctx.moveTo(xEv, y - 4); ctx.lineTo(xEv - 4, y - 11); ctx.lineTo(xEv + 4, y - 11);
+      }
+      ctx.closePath();
+      ctx.fillStyle = clr;
+      ctx.fill();
+
+      ctx.restore();
+    });
+
+    // ── 5. Premium / Discount Zones ───────────────────────────────
+    if (smc.pdZone) {
+      const pd  = smc.pdZone;
+      const x1  = toX(pd.startTime);
+      const x2  = toX(pd.endTime);
+      const yHi = toY(pd.hi);
+      const yEq = toY(pd.eq);
+      const yLo = toY(pd.lo);
+      if (x1 != null && x2 != null && yHi != null && yEq != null && yLo != null) {
+        const left = Math.min(x1, x2);
+        const wid  = Math.abs(x2 - x1);
+
+        // Premium zone (hi → eq): soft red
+        ctx.save();
+        ctx.fillStyle = 'rgba(255,59,48,0.07)';
+        ctx.fillRect(left, yHi, wid, Math.abs(yEq - yHi));
+
+        // Discount zone (eq → lo): soft green
+        ctx.fillStyle = 'rgba(0,230,118,0.07)';
+        ctx.fillRect(left, yEq, wid, Math.abs(yLo - yEq));
+
+        // EQ midline
+        ctx.strokeStyle = 'rgba(255,255,255,0.35)';
+        ctx.lineWidth = 1;
+        ctx.setLineDash([6, 4]);
+        ctx.beginPath(); ctx.moveTo(left, yEq); ctx.lineTo(left + wid, yEq); ctx.stroke();
+        ctx.setLineDash([]);
+
+        // Top/bottom borders
+        ctx.strokeStyle = 'rgba(255,59,48,0.45)';
+        ctx.lineWidth = 0.8;
+        ctx.beginPath(); ctx.moveTo(left, yHi); ctx.lineTo(left + wid, yHi); ctx.stroke();
+        ctx.strokeStyle = 'rgba(0,230,118,0.45)';
+        ctx.beginPath(); ctx.moveTo(left, yLo); ctx.lineTo(left + wid, yLo); ctx.stroke();
+
+        // Labels on right edge
+        const labelX = left + wid - 60;
+        ctx.font = 'bold 8px monospace';
+
+        ctx.fillStyle = 'rgba(255,100,100,0.80)';
+        ctx.fillText('PREMIUM', labelX, yHi + 10);
+
+        ctx.fillStyle = 'rgba(255,255,255,0.60)';
+        ctx.fillText('EQ', labelX, yEq - 3);
+
+        ctx.fillStyle = 'rgba(0,220,100,0.80)';
+        ctx.fillText('DISCOUNT', labelX, yLo - 3);
+        ctx.restore();
+      }
+    }
+
+    // ── 6. Manipulation / Stop Hunt markers ──────────────────────
+    (smc.manipulations || []).forEach(hunt => {
+      const xEv   = toX(hunt.eventTime);
+      const yWick = toY(hunt.wickExtreme);
+      const ySwp  = toY(hunt.sweepLevel);
+      const yCls  = toY(hunt.closeLevel);
+      if (xEv == null || yWick == null) return;
+      const isBull = hunt.type === 'bull_hunt';
+      ctx.save();
+
+      // Vertical strike line through the manipulation candle
+      ctx.strokeStyle = 'rgba(255,140,0,0.85)';
+      ctx.lineWidth = 2;
+      ctx.beginPath();
+      ctx.moveTo(xEv, Math.min(yWick, yCls ?? yWick));
+      ctx.lineTo(xEv, Math.max(yWick, yCls ?? yWick));
+      ctx.stroke();
+
+      // Wick dot (where SL sits)
+      ctx.fillStyle = '#FF3B30';
+      ctx.beginPath(); ctx.arc(xEv, yWick, 4, 0, Math.PI * 2); ctx.fill();
+
+      // Sweep level dashed line
+      if (ySwp != null) {
+        ctx.strokeStyle = 'rgba(255,140,0,0.45)';
+        ctx.lineWidth = 1; ctx.setLineDash([5, 3]);
+        ctx.beginPath(); ctx.moveTo(xEv - 25, ySwp); ctx.lineTo(xEv + 25, ySwp); ctx.stroke();
+        ctx.setLineDash([]);
+      }
+
+      // Label pill
+      ctx.font = 'bold 8px monospace';
+      const lbl = isBull ? 'HUNT↓' : 'HUNT↑';
+      const tw  = ctx.measureText(lbl).width + 8;
+      const ly  = isBull ? yWick + 5 : yWick - 18;
+      ctx.fillStyle = 'rgba(255,140,0,0.22)';
+      ctx.fillRect(xEv - tw / 2, ly, tw, 13);
+      ctx.fillStyle = '#FFA500';
+      ctx.fillText(lbl, xEv - tw / 2 + 4, ly + 9);
+
+      // SL label
+      if (ySwp != null) {
+        ctx.fillStyle = 'rgba(255,59,48,0.85)';
+        ctx.font = '7px monospace';
+        ctx.fillText('SL', xEv + 6, yWick + (isBull ? -2 : 4));
+      }
+      ctx.restore();
+    });
+
+    // ── 7. Refined Entry Zones (CHoCH-based) ─────────────────────
+    (smc.refinedEntries || []).forEach(entry => {
+      const yEH  = toY(entry.entryHigh);
+      const yEL  = toY(entry.entryLow);
+      const ySL  = toY(entry.slLevel);
+      const yTgt = entry.target ? toY(entry.target) : null;
+      const xEv  = toX(entry.eventTime);
+      if (yEH == null || yEL == null || ySL == null) return;
+      const isBull   = entry.direction === 'bull';
+      const eClr     = isBull ? '#00E676' : '#FF3B30';
+      const xLeft    = xEv != null ? xEv : 0;
+      const xRight   = W - 6;
+      ctx.save();
+
+      // Entry zone shaded box
+      const ezTop = Math.min(yEH, yEL);
+      const ezH   = Math.max(2, Math.abs(yEH - yEL));
+      ctx.fillStyle = isBull ? 'rgba(0,230,118,0.14)' : 'rgba(255,59,48,0.14)';
+      ctx.fillRect(xLeft, ezTop, xRight - xLeft, ezH);
+      ctx.strokeStyle = eClr; ctx.lineWidth = 1.5; ctx.setLineDash([4, 3]);
+      ctx.beginPath(); ctx.moveTo(xLeft, ezTop);      ctx.lineTo(xRight, ezTop);      ctx.stroke();
+      ctx.beginPath(); ctx.moveTo(xLeft, ezTop + ezH); ctx.lineTo(xRight, ezTop + ezH); ctx.stroke();
+      ctx.setLineDash([]);
+      ctx.fillStyle = eClr; ctx.font = 'bold 8px monospace';
+      ctx.fillText(isBull ? '▲ ENTRY' : '▼ ENTRY', xRight - 52, ezTop - 3);
+
+      // SL line
+      ctx.strokeStyle = '#FF3B30'; ctx.lineWidth = 1; ctx.setLineDash([3, 3]);
+      ctx.beginPath(); ctx.moveTo(xLeft, ySL); ctx.lineTo(xRight, ySL); ctx.stroke();
+      ctx.setLineDash([]);
+      ctx.fillStyle = '#FF3B30'; ctx.font = 'bold 7px monospace';
+      ctx.fillText('SL', xRight - 14, ySL - 2);
+
+      // Target line
+      if (yTgt != null) {
+        ctx.strokeStyle = eClr; ctx.lineWidth = 1; ctx.setLineDash([6, 3]);
+        ctx.beginPath(); ctx.moveTo(xLeft, yTgt); ctx.lineTo(xRight, yTgt); ctx.stroke();
+        ctx.setLineDash([]);
+        ctx.fillStyle = eClr; ctx.font = 'bold 7px monospace';
+        ctx.fillText('TGT', xRight - 20, yTgt - 2);
+
+        // R:R ratio
+        const risk   = Math.abs(ySL - (yEH + yEL) / 2);
+        const reward = Math.abs(yTgt - (yEH + yEL) / 2);
+        const rr     = risk > 0 ? (reward / risk).toFixed(1) : '?';
+        ctx.fillStyle = 'rgba(255,255,255,0.65)';
+        ctx.font = 'bold 7px monospace';
+        ctx.fillText(`R:R ${rr}x`, xLeft + 4, (yEH + yEL) / 2 + 4);
+      }
+      ctx.restore();
+    });
+
+    ctx.restore();
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  const fetchVolumeProfile = useCallback(async (bars, ticker) => {
+    if (!bars || bars.length < 30) return;
+    try {
+      const resp = await axios.post(`${API}/orderflow/analyze`, {
+        ticker,
+        bars,
+        n_vp_bins: 30,
+        n_fp_levels: 8,
+        vp_lookback: Math.min(60, bars.length),
+      });
+      vpDataRef.current = resp.data;
+      clearVPLines();
+      const d = resp.data;
+      if (candlestickSeriesRef.current) {
+        [
+          [d.poc_price, 'POC', '#FF6B00', 1],
+          [d.vah_price, 'VAH', '#A855F7', 2],
+          [d.val_price, 'VAL', '#06B6D4', 2],
+        ].forEach(([price, title, color, lineStyle]) => {
+          if (!price) return;
+          try {
+            const pl = candlestickSeriesRef.current.createPriceLine({
+              price, color, lineWidth: 1, lineStyle, axisLabelVisible: true, title,
+            });
+            vpPriceLinesRef.current.push(pl);
+          } catch (e) {}
+        });
+      }
+      setVpActive(true);
+    } catch (e) {
+      console.warn('VP fetch:', e.message);
+    }
+  }, [clearVPLines]);
+
+  // VP interaction handlers
+  const handleVPMouseMove = useCallback((e) => {
+    const rect = e.currentTarget.getBoundingClientRect();
+    vpHoverYRef.current = e.clientY - rect.top;
+  }, []);
+
+  const handleVPMouseLeave = useCallback(() => {
+    vpHoverYRef.current = null;
+  }, []);
+
+  const handleVPClick = useCallback((e) => {
+    e.stopPropagation();
+    const series = candlestickSeriesRef.current;
+    const d = vpDataRef.current;
+    if (!series || !d?.vp_bins?.length) return;
+    const rect = e.currentTarget.getBoundingClientRect();
+    const clickY = e.clientY - rect.top;
+    const maxVol = Math.max(...d.vp_bins.map(b => b.total_vol)) || 1;
+    const H = chartContainerRef.current?.clientHeight || 300;
+    const rowH = Math.max(3, (H / d.vp_bins.length) * 0.72);
+    let closestBin = null, minDist = Infinity;
+    d.vp_bins.forEach(bin => {
+      const y = series.priceToCoordinate(bin.price_mid);
+      if (y == null) return;
+      const dist = Math.abs(y - clickY);
+      if (dist < minDist) { minDist = dist; closestBin = bin; }
+    });
+    if (closestBin && minDist < rowH * 1.5) {
+      if (vpTooltip?.bin?.price_mid === closestBin.price_mid) {
+        setVpTooltip(null);
+        return;
+      }
+      setVpTooltip({
+        y: Math.max(8, Math.min(clickY, H - 200)),
+        bin: closestBin,
+        maxVol,
+        poc: d.poc_price,
+        vah: d.vah_price,
+        val: d.val_price,
+      });
+    } else {
+      setVpTooltip(null);
+    }
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [vpTooltip]);
+
+  const drawGannLines = (pivot, extension) => {
+    if (!chartRef.current || !pivot || !stockData || !showGannLines) return;
+    clearGannLines();
+    const bars = stockData.bars;
+    const pivotIndex = bars.findIndex(b => Math.abs(b.timestamp - pivot.timestamp) < 86400000);
+    if (pivotIndex === -1) return;
+    const pivotPrice = pivot.price;
+    const isBullish = pivot.type === 'low';
+    const priceRange = Math.max(...bars.map(b => b.high)) - Math.min(...bars.map(b => b.low));
+    const avgPricePerBar = priceRange / bars.length;
+    const angles = [
+      { name: '1x1', ratio: 1.0, color: '#3B82F6', width: 3 },
+      { name: '2x1', ratio: 2.0, color: '#A855F7', width: 2 },
+      { name: '1x2', ratio: 0.5, color: '#FF0055', width: 2 },
+      { name: '3x1', ratio: 3.0, color: '#F5A623', width: 1 },
+      { name: '1x3', ratio: 0.333, color: '#00E676', width: 1 },
+    ];
+    const direction = isBullish ? 1 : -1;
+    const barsToProject = Math.min(extension, bars.length - pivotIndex);
+
+    angles.forEach(angle => {
+      try {
+        const lineSeries = chartRef.current.addLineSeries({
+          color: angle.color, lineWidth: angle.width, lineStyle: 0,
+          priceLineVisible: false, lastValueVisible: false, crosshairMarkerVisible: false, title: angle.name,
+        });
+        const lineData = [{ time: bars[pivotIndex].timestamp / 1000, value: pivotPrice }];
+        for (let i = 1; i <= barsToProject; i++) {
+          const barIndex = pivotIndex + i;
+          if (barIndex >= bars.length) break;
+          lineData.push({
+            time: bars[barIndex].timestamp / 1000,
+            value: pivotPrice + (i * avgPricePerBar * angle.ratio * direction)
+          });
+        }
+        if (lineData.length >= 2) {
+          lineSeries.setData(lineData);
+          gannLineSeriesRef.current.push(lineSeries);
+        }
+      } catch (e) {}
+    });
+  };
+
+  useEffect(() => {
+    // Use refs so cleanup always has access to the latest instances
+    let retryTimer;
+    let chartInst = null;
+    let handleResize = null;
+    let roInst = null;
+
+    const initChart = () => {
+      if (!chartContainerRef.current) return;
+      const h = chartContainerRef.current.clientHeight;
+      if (h < 10) {
+        retryTimer = setTimeout(initChart, 40);   // retry until layout settles
+        return;
+      }
+      const isDark = document.documentElement.classList.contains('dark');
+      const chart = createChart(chartContainerRef.current, {
+        width: chartContainerRef.current.clientWidth,
+        height: h,
+        layout: {
+          background: { color: isDark ? '#0A0A0A' : '#FFFFFF' },
+          textColor: isDark ? '#52525B' : '#64748B',
+        },
+        grid: {
+          vertLines: { color: isDark ? 'rgba(255,255,255,0.03)' : 'rgba(0,0,0,0.04)' },
+          horzLines: { color: isDark ? 'rgba(255,255,255,0.03)' : 'rgba(0,0,0,0.04)' },
+        },
+        rightPriceScale: { borderColor: isDark ? 'rgba(255,255,255,0.08)' : 'rgba(0,0,0,0.1)', mode: semiLogScale ? 2 : 0 },
+        timeScale: { borderColor: isDark ? 'rgba(255,255,255,0.08)' : 'rgba(0,0,0,0.1)', timeVisible: true, rightOffset: 10, barSpacing: 6, minBarSpacing: 0.5 },
+        crosshair: { mode: 1 },
+        localization: { locale: 'en-US' },
+        handleScroll: { mouseWheel: true, pressedMouseMove: true, horzTouchDrag: true, vertTouchDrag: true },
+        handleScale: { axisPressedMouseMove: true, mouseWheel: true, pinch: true },
+      });
+      chartInst = chart;
+      chartRef.current = chart;
+
+      const cs = chart.addCandlestickSeries({
+        upColor: '#00E676', downColor: '#FF3B30', borderVisible: false,
+        wickUpColor: '#00E676', wickDownColor: '#FF3B30',
+      });
+      candlestickSeriesRef.current = cs;
+      chart.timeScale().fitContent();
+
+      handleResize = () => {
+        if (chartContainerRef.current && chart) {
+          chart.applyOptions({
+            width: chartContainerRef.current.clientWidth,
+            height: chartContainerRef.current.clientHeight,
+          });
+        }
+      };
+      window.addEventListener('resize', handleResize);
+
+      // ResizeObserver — fires when container height changes (OrderFlow expand/collapse)
+      roInst = new ResizeObserver(handleResize);
+      roInst.observe(chartContainerRef.current);
+    };
+
+    initChart();
+
+    // useEffect cleanup — always runs, even if chart was never created
+    return () => {
+      clearTimeout(retryTimer);
+      if (handleResize) window.removeEventListener('resize', handleResize);
+      if (roInst) roInst.disconnect();
+      clearGannLines();
+      if (chartInst) chartInst.remove();
+    };
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  useEffect(() => {
+    if (chartRef.current) chartRef.current.applyOptions({ rightPriceScale: { mode: semiLogScale ? 2 : 0 } });
+  }, [semiLogScale]);
+
+  // Update chart colors when theme changes
+  useEffect(() => {
+    if (!chartRef.current) return;
+    const isDark = theme === 'dark';
+    chartRef.current.applyOptions({
+      layout: {
+        background: { color: isDark ? '#0A0A0A' : '#FFFFFF' },
+        textColor: isDark ? '#52525B' : '#64748B',
+      },
+      grid: {
+        vertLines: { color: isDark ? 'rgba(255,255,255,0.03)' : 'rgba(0,0,0,0.04)' },
+        horzLines: { color: isDark ? 'rgba(255,255,255,0.03)' : 'rgba(0,0,0,0.04)' },
+      },
+      rightPriceScale: { borderColor: isDark ? 'rgba(255,255,255,0.08)' : 'rgba(0,0,0,0.1)' },
+      timeScale: { borderColor: isDark ? 'rgba(255,255,255,0.08)' : 'rgba(0,0,0,0.1)' },
+    });
+  }, [theme]);
+
+  useEffect(() => {
+    if (!stockData || !candlestickSeriesRef.current) return;
+    const chartData = stockData.bars.map(bar => ({ time: bar.timestamp / 1000, open: bar.open, high: bar.high, low: bar.low, close: bar.close }));
+    candlestickSeriesRef.current.setData(chartData);
+    chartRef.current.timeScale().fitContent();
+  }, [stockData]);
+
+  // ── Parity Trade Signal Lines (Buy/Sell/SL/Target) ────────────
+  useEffect(() => {
+    const series = candlestickSeriesRef.current;
+    // Clear old lines
+    tradeSignalLinesRef.current.forEach(pl => { try { series?.removePriceLine(pl); } catch(e) {} });
+    tradeSignalLinesRef.current = [];
+    if (!tradeSignal || !series) return;
+    const { direction, entry, sl, target } = tradeSignal;
+    const isBuy = direction === 'BUY';
+    const defs = [
+      { price: entry,  color: isBuy ? '#3B82F6' : '#F59E0B', title: `${direction} ENTRY`, lineStyle: 0, lineWidth: 2 },
+      { price: sl,     color: '#FF3B30',                      title: 'SL',                lineStyle: 2, lineWidth: 1 },
+      { price: target, color: '#00E676',                      title: 'TARGET',             lineStyle: 2, lineWidth: 1 },
+    ];
+    tradeSignalLinesRef.current = defs.map(d => {
+      try {
+        return series.createPriceLine({ price: d.price, color: d.color, lineWidth: d.lineWidth, lineStyle: d.lineStyle, axisLabelVisible: true, title: d.title });
+      } catch(e) { return null; }
+    }).filter(Boolean);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [tradeSignal, stockData]);
+
+  // ── Volume Profile: fetch when stock/data changes ──────────────
+  useEffect(() => {
+    clearVPLines();
+    vpDataRef.current = null;
+    setVpActive(false);
+    setVpTooltip(null);
+    if (!stockData?.bars?.length) return;
+    const ticker = selectedStock?.ticker || selectedStock?.symbol || 'STOCK';
+    // Small delay so chart settles first
+    const t = setTimeout(() => fetchVolumeProfile(stockData.bars, ticker), 400);
+    return () => clearTimeout(t);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [stockData, selectedStock]);
+
+  // ── Volume Profile: animation loop ────────────────────────────
+  useEffect(() => {
+    if (!vpActive) {
+      if (vpAnimRef.current) cancelAnimationFrame(vpAnimRef.current);
+      return;
+    }
+    const loop = () => {
+      drawVPCanvas();
+      vpAnimRef.current = requestAnimationFrame(loop);
+    };
+    vpAnimRef.current = requestAnimationFrame(loop);
+    return () => { if (vpAnimRef.current) cancelAnimationFrame(vpAnimRef.current); };
+  }, [vpActive, drawVPCanvas]);
+
+  // ── SMC: compute when bars change ─────────────────────────────
+  useEffect(() => {
+    smcDataRef.current = null;
+    if (!stockData?.bars?.length) return;
+    smcDataRef.current = computeSMCData(stockData.bars);
+  }, [stockData]);
+
+  // ── SMC: animation loop ────────────────────────────────────────
+  useEffect(() => {
+    if (!smcActive) {
+      if (smcAnimRef.current) cancelAnimationFrame(smcAnimRef.current);
+      const c = smcCanvasRef.current;
+      if (c) { const ctx = c.getContext('2d'); ctx.clearRect(0, 0, c.width, c.height); }
+      return;
+    }
+    const loop = () => { drawSMCCanvas(); smcAnimRef.current = requestAnimationFrame(loop); };
+    smcAnimRef.current = requestAnimationFrame(loop);
+    return () => { if (smcAnimRef.current) cancelAnimationFrame(smcAnimRef.current); };
+  }, [smcActive, drawSMCCanvas]);
+
+  useEffect(() => {
+    if (showGannLines && pivotPoint && stockData) {
+      setTimeout(() => drawGannLines(pivotPoint, lineExtension), 50);
+    } else { clearGannLines(); }
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [pivotPoint, showGannLines, stockData, lineExtension]);
+
+  const handleChartClick = (param) => {
+    if (!stockData || !param.time) return;
+    const clickedTime = param.time * 1000;
+    const bar = stockData.bars.find(b => Math.abs(b.timestamp - clickedTime) < 86400000);
+    if (!bar) return;
+    if (isMovingMode && pivotPoint) {
+      const price = pivotPoint.type === 'high' ? bar.high : bar.low;
+      onPivotSelect({ price, timestamp: bar.timestamp, type: pivotPoint.type });
+      return;
+    }
+    if (selectMode) {
+      const price = selectMode === 'high' ? bar.high : bar.low;
+      onPivotSelect({ price, timestamp: bar.timestamp, type: selectMode });
+      setSelectMode(null);
+      setIsMovingMode(true);
+    }
+  };
+
+  useEffect(() => {
+    if (!chartRef.current) return;
+    chartRef.current.subscribeClick(handleChartClick);
+    return () => { if (chartRef.current) { try { chartRef.current.unsubscribeClick(handleChartClick); } catch (e) {} } };
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [selectMode, stockData, isMovingMode, pivotPoint]);
+
+  const handleDeleteGann = () => { onPivotSelect(null); clearGannLines(); setIsMovingMode(false); };
+
+  // Fullscreen: ESC to exit + chart resize trigger
+  useEffect(() => {
+    const onKey = (e) => { if (e.key === 'Escape') setIsFullscreen(false); };
+    document.addEventListener('keydown', onKey);
+    return () => document.removeEventListener('keydown', onKey);
+  }, []);
+
+  // TF dropdown: close on outside click (works on mobile touch too)
+  useEffect(() => {
+    const handler = (e) => {
+      if (
+        !(tfBtnRef.current && tfBtnRef.current.contains(e.target)) &&
+        !(tfDropdownRef.current && tfDropdownRef.current.contains(e.target))
+      ) setTfOpen(false);
+    };
+    document.addEventListener('click', handler);
+    return () => document.removeEventListener('click', handler);
+  }, []);
+
+  useEffect(() => {
+    const t = setTimeout(() => {
+      if (chartRef.current && chartContainerRef.current) {
+        chartRef.current.applyOptions({
+          width:  chartContainerRef.current.clientWidth,
+          height: chartContainerRef.current.clientHeight,
+        });
+      }
+    }, 60);
+    return () => clearTimeout(t);
+  }, [isFullscreen]);
+
+  return (
+    <div
+      className={`flex flex-col ${
+        isFullscreen
+          ? 'fixed inset-0 z-[9999] bg-white dark:bg-[#0A0A0A]'
+          : 'h-full'
+      }`}
+      data-testid="chart-panel"
+    >
+      {/* Chart Toolbar — scrollable row on mobile */}
+      <div className="flex items-center justify-between px-2 py-1 border-b border-slate-200 dark:border-white/10 bg-white dark:bg-[#0A0A0A] shrink-0 gap-1 overflow-x-auto scrollbar-none transition-colors duration-200">
+        <div className="flex items-center gap-1 flex-nowrap shrink-0">
+          {/* TF Selector — TradingView style grouped dropdown */}
+          <div className="shrink-0">
+            <button
+              ref={tfBtnRef}
+              onClick={() => {
+                if (!tfOpen && tfBtnRef.current) {
+                  const rect = tfBtnRef.current.getBoundingClientRect();
+                  const dropW = 170;
+                  const left = Math.min(rect.left, window.innerWidth - dropW - 8);
+                  setTfDropdownPos({ top: rect.bottom + 4, left: Math.max(8, left) });
+                }
+                setTfOpen(p => !p);
+              }}
+              className={`px-2.5 py-1 text-[11px] font-mono font-bold uppercase tracking-wider flex items-center gap-1.5 transition-all border shrink-0 ${
+                tfOpen
+                  ? 'bg-slate-900 dark:bg-white/15 text-white border-white/30'
+                  : 'bg-slate-900 dark:bg-white/8 text-white dark:text-zinc-100 border-white/15 hover:bg-slate-700 dark:hover:bg-white/15'
+              }`}
+              data-testid="tf-trigger"
+            >
+              {timeframe.label}
+              <span className={`text-[8px] transition-transform duration-200 ${tfOpen ? 'rotate-180' : ''}`}>▾</span>
+            </button>
+
+            {tfOpen && (
+              <div
+                ref={tfDropdownRef}
+                className="bg-white dark:bg-[#1C1C1C] border border-slate-200 dark:border-white/10 shadow-2xl"
+                style={{
+                  position: 'fixed',
+                  top: tfDropdownPos.top,
+                  left: tfDropdownPos.left,
+                  zIndex: 9999,
+                  minWidth: 170,
+                  maxHeight: 420,
+                  overflowY: 'auto',
+                }}
+              >
+                {TF_GROUPS.map(grp => (
+                  <div key={grp.group}>
+                    <div className="px-3 pt-2.5 pb-0.5 text-[9px] font-bold tracking-widest text-slate-400 dark:text-zinc-500 uppercase select-none">
+                      {grp.group}
+                    </div>
+                    {grp.items.map(tf => (
+                      <button
+                        key={tf.label}
+                        onClick={() => { onTimeframeChange(tf); setTfOpen(false); }}
+                        className={`w-full text-left px-3 py-[7px] text-[13px] font-medium transition-colors ${
+                          timeframe.label === tf.label
+                            ? 'bg-blue-600 text-white'
+                            : 'text-slate-700 dark:text-zinc-200 hover:bg-slate-100 dark:hover:bg-white/8'
+                        }`}
+                        data-testid={`tf-${tf.label}`}
+                      >
+                        {tf.displayName}
+                      </button>
+                    ))}
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
+          <div className="w-px h-4 bg-slate-200 dark:bg-white/10 mx-1 shrink-0" />
+          {/* Gann toggle */}
+          <button
+            onClick={() => setShowGannLines(!showGannLines)}
+            className={`px-2 py-1 text-[10px] font-bold uppercase tracking-wider transition-all flex items-center gap-1 whitespace-nowrap shrink-0 ${
+              showGannLines ? 'text-[#3B82F6]' : 'text-zinc-500'
+            }`}
+            data-testid="gann-toggle"
+          >
+            <ChartLine size={12} weight="bold" />
+            <span className="hidden sm:inline">GANN</span>
+          </button>
+          {/* SMC toggle */}
+          <button
+            onClick={() => setSmcActive(!smcActive)}
+            className={`px-2 py-1 text-[10px] font-bold uppercase tracking-wider transition-all whitespace-nowrap shrink-0 border ${
+              smcActive
+                ? 'text-[#F5A623] border-[#F5A623]/40 bg-[#F5A623]/8'
+                : 'text-zinc-500 border-transparent'
+            }`}
+            data-testid="smc-toggle"
+            title="SMC Auto Mark — FVG + Liquidity + Order Blocks"
+          >
+            SMC
+          </button>
+          {/* Log toggle */}
+          <button
+            onClick={() => setSemiLogScale(!semiLogScale)}
+            className={`px-2 py-1 text-[10px] font-bold uppercase tracking-wider transition-all whitespace-nowrap shrink-0 ${
+              semiLogScale ? 'text-[#F5A623]' : 'text-zinc-500'
+            }`}
+            data-testid="log-toggle"
+          >
+            LOG
+          </button>
+          {/* Data source toggle — Yahoo / Groww (Indian stocks only) */}
+          {!isCrypto && onDataSourceChange && (
+            <>
+              <div className="w-px h-4 bg-slate-200 dark:bg-white/10 mx-1 shrink-0" />
+              <div className="flex items-center gap-0 shrink-0 border border-slate-200 dark:border-white/10">
+                <button
+                  onClick={() => onDataSourceChange('yahoo')}
+                  className={`px-1.5 py-0.5 text-[9px] font-bold uppercase tracking-wider transition-all ${
+                    dataSource === 'yahoo' ? 'bg-slate-900 dark:bg-white text-white dark:text-black' : 'text-slate-400 dark:text-zinc-500 hover:text-slate-800 dark:hover:text-white'
+                  }`}
+                  data-testid="src-yahoo"
+                  title="Yahoo Finance"
+                >Y</button>
+                <button
+                  onClick={() => onDataSourceChange('groww')}
+                  className={`px-1.5 py-0.5 text-[9px] font-bold uppercase tracking-wider transition-all ${
+                    dataSource === 'groww' ? 'bg-[#00E676] text-black' : 'text-slate-400 dark:text-zinc-500 hover:text-slate-800 dark:hover:text-white'
+                  }`}
+                  data-testid="src-groww"
+                  title="Groww live data"
+                >G</button>
+              </div>
+            </>
+          )}
+          {/* Trade button (Indian stocks) — opens Groww order modal */}
+          {!isCrypto && selectedStock && (
+            <>
+          <div className="w-px h-4 bg-slate-200 dark:bg-white/10 mx-1 shrink-0" />
+              <button
+                onClick={() => setShowTrade(true)}
+                className="px-2 py-1 text-[10px] font-black uppercase tracking-wider bg-[#00E676] text-black hover:opacity-90 active:opacity-80 flex items-center gap-1 whitespace-nowrap shrink-0"
+                data-testid="trade-btn"
+              >
+                <Lightning size={11} weight="fill" />
+                TRADE
+              </button>
+            </>
+          )}
+        </div>
+
+        <div className="flex items-center gap-1 shrink-0">
+          {/* Fullscreen toggle */}
+          <button
+            onClick={() => setIsFullscreen(!isFullscreen)}
+            className="px-2 py-1 text-[10px] font-bold uppercase tracking-wider transition-all text-slate-400 dark:text-zinc-500 hover:text-slate-800 dark:hover:text-white shrink-0"
+            data-testid="fullscreen-btn"
+            title={isFullscreen ? 'Exit Fullscreen (ESC)' : 'Fullscreen'}
+          >
+            {isFullscreen ? <ArrowsIn size={13} weight="bold" /> : <ArrowsOut size={13} weight="bold" />}
+          </button>
+          <div className="w-px h-4 bg-slate-200 dark:bg-white/10 shrink-0" />
+          {!pivotPoint && (
+            <>
+              <button
+                onClick={() => setSelectMode('high')}
+                className={`px-2 py-1 text-[10px] font-bold uppercase tracking-wider transition-all flex items-center gap-0.5 whitespace-nowrap ${
+                  selectMode === 'high' ? 'bg-[#FF3B30] text-white' : 'text-slate-400 dark:text-zinc-500 hover:text-slate-800 dark:hover:text-white'
+                }`}
+                data-testid="select-high-btn"
+              >
+                <TrendUp size={11} weight="bold" />
+                <span className="hidden xs:inline">HIGH</span>
+              </button>
+              <button
+                onClick={() => setSelectMode('low')}
+                className={`px-2 py-1 text-[10px] font-bold uppercase tracking-wider transition-all flex items-center gap-0.5 whitespace-nowrap ${
+                  selectMode === 'low' ? 'bg-[#00E676] text-black' : 'text-slate-400 dark:text-zinc-500 hover:text-slate-800 dark:hover:text-white'
+                }`}
+                data-testid="select-low-btn"
+              >
+                <TrendDown size={11} weight="bold" />
+                <span className="hidden xs:inline">LOW</span>
+              </button>
+            </>
+          )}
+          {pivotPoint && (
+            <>
+              <span className="text-[9px] font-mono text-slate-500 dark:text-zinc-400 whitespace-nowrap">
+                P: {pivotPoint.price.toFixed(0)}
+              </span>
+              <button
+                onClick={() => setIsMovingMode(!isMovingMode)}
+                className={`px-2 py-1 text-[10px] font-bold uppercase tracking-wider whitespace-nowrap ${
+                  isMovingMode ? 'bg-[#F5A623] text-black' : 'text-slate-400 dark:text-zinc-500 hover:text-slate-800 dark:hover:text-white'
+                }`}
+                data-testid="move-pivot-btn"
+              >
+                {isMovingMode ? 'MOVE' : 'MOVE'}
+              </button>
+              <button onClick={handleDeleteGann} className="px-2 py-1 text-[10px] font-bold uppercase tracking-wider text-slate-400 dark:text-zinc-500 hover:text-[#FF3B30]" data-testid="clear-gann-btn">
+                <Trash size={12} weight="bold" />
+              </button>
+            </>
+          )}
+        </div>
+      </div>
+
+      {/* Extension slider */}
+      {pivotPoint && showGannLines && (
+        <div className="flex items-center gap-3 px-3 py-1 border-b border-slate-200 dark:border-white/10 bg-white dark:bg-[#0A0A0A] shrink-0">
+          <span className="text-[10px] text-slate-400 dark:text-zinc-500 font-mono whitespace-nowrap">Ext: {lineExtension}</span>
+          <input
+            type="range"
+            min={10} max={100} step={5}
+            value={lineExtension}
+            onChange={(e) => setLineExtension(Number(e.target.value))}
+            className="flex-1 h-1 accent-[#3B82F6]"
+            data-testid="line-extension-slider"
+          />
+          <div className="flex items-center gap-2 text-[9px] font-mono">
+            <span className="text-[#3B82F6]">1x1</span>
+            <span className="text-[#A855F7]">2x1</span>
+            <span className="text-[#FF0055]">1x2</span>
+            <span className="text-[#F5A623]">3x1</span>
+            <span className="text-[#00E676]">1x3</span>
+          </div>
+        </div>
+      )}
+
+      {/* Chart area */}
+      <div className="flex-1 relative" ref={chartContainerRef}>
+        {loading && (
+          <div className="absolute inset-0 flex items-center justify-center bg-white/80 dark:bg-[#0A0A0A]/80 z-10">
+            <p className="text-xs font-mono text-slate-400 dark:text-zinc-400 animate-pulse">Loading chart data...</p>
+          </div>
+        )}
+        {!loading && !stockData && (
+          <div className="absolute inset-0 flex flex-col items-center justify-center">
+            <ChartLine size={48} className="text-slate-300 dark:text-zinc-700 mb-3" />
+            <p className="text-sm text-slate-400 dark:text-zinc-500">Select a stock or crypto to view chart</p>
+            <p className="text-[10px] text-slate-300 dark:text-zinc-600 mt-1 font-mono">Scroll to zoom / Drag to pan</p>
+          </div>
+        )}
+
+        {/* Parity Trade Signal Pill — top left overlay */}
+        {tradeSignal && (
+          <div className={`absolute top-2 left-2 z-20 flex items-center gap-2 px-3 py-1.5 rounded-lg text-xs font-bold shadow-lg border backdrop-blur-sm
+            ${tradeSignal.direction === 'BUY'
+              ? 'bg-emerald-900/80 border-emerald-500/50 text-emerald-300'
+              : 'bg-rose-900/80 border-rose-500/50 text-rose-300'}`}
+            data-testid="trade-signal-pill"
+          >
+            <span>{tradeSignal.direction === 'BUY' ? '▲' : '▼'} {tradeSignal.symbol} {tradeSignal.direction}</span>
+            <span className="text-white/60">|</span>
+            <span className="text-slate-300">E: {tradeSignal.entry}</span>
+            <span className="text-red-400">SL: {tradeSignal.sl}</span>
+            <span className="text-emerald-400">T: {tradeSignal.target}</span>
+          </div>
+        )}
+
+        {/* Volume Profile Canvas Overlay — left side, clickable for price-level detail */}
+        <canvas
+          ref={vpCanvasRef}
+          onClick={handleVPClick}
+          onMouseMove={handleVPMouseMove}
+          onMouseLeave={handleVPMouseLeave}
+          style={{
+            position: 'absolute', left: 0, top: 0,
+            zIndex: 5,
+            cursor: vpActive ? 'crosshair' : 'default',
+            display: vpActive ? 'block' : 'none',
+          }}
+        />
+
+        {/* SMC Auto Mark Canvas — full chart overlay, pointer-events none */}
+        <canvas
+          ref={smcCanvasRef}
+          style={{
+            position: 'absolute', left: 0, top: 0,
+            zIndex: 4,
+            pointerEvents: 'none',
+            display: smcActive ? 'block' : 'none',
+          }}
+        />
+
+        {/* VP Tooltip — price level detail popup */}
+        {vpTooltip && (
+          <div
+            style={{ position: 'absolute', left: VP_WIDTH + 6, top: vpTooltip.y, zIndex: 25, minWidth: 168 }}
+            className="bg-[#0D0D0D] border border-white/20 shadow-2xl text-[9px] font-mono"
+            data-testid="vp-tooltip"
+          >
+            {/* Header */}
+            <div className="px-2.5 py-1.5 border-b border-white/10 flex items-center justify-between gap-2">
+              <span className="text-white font-bold text-[11px]">₹{vpTooltip.bin.price_mid.toFixed(2)}</span>
+              <div className="flex gap-1 items-center flex-wrap justify-end">
+                {vpTooltip.bin.is_poc && (
+                  <span className="text-[#FF6B00] text-[7px] font-bold px-1 border border-[#FF6B00]/50">◆ POC</span>
+                )}
+                {Math.abs(vpTooltip.bin.price_mid - vpTooltip.vah) < vpTooltip.vah * 0.005 && (
+                  <span className="text-[#A855F7] text-[7px] px-1 border border-[#A855F7]/50">VAH</span>
+                )}
+                {Math.abs(vpTooltip.bin.price_mid - vpTooltip.val) < vpTooltip.val * 0.005 && (
+                  <span className="text-[#06B6D4] text-[7px] px-1 border border-[#06B6D4]/50">VAL</span>
+                )}
+                {vpTooltip.bin.in_value_area && !vpTooltip.bin.is_poc && (
+                  <span className="text-zinc-600 text-[7px]">VA</span>
+                )}
+                <button
+                  onClick={() => setVpTooltip(null)}
+                  className="text-zinc-600 hover:text-white ml-1 text-[9px] leading-none"
+                  data-testid="vp-tooltip-close"
+                >✕</button>
+              </div>
+            </div>
+            {/* Volume bars */}
+            <div className="px-2.5 py-2 space-y-2">
+              {[
+                { label: 'Buy', vol: vpTooltip.bin.buy_vol, color: '#00E676' },
+                { label: 'Sell', vol: vpTooltip.bin.sell_vol, color: '#FF3B30' },
+              ].map(({ label, vol, color }) => (
+                <div key={label}>
+                  <div className="flex justify-between mb-0.5">
+                    <span style={{ color }}>{label}</span>
+                    <span style={{ color }} className="font-bold">{fmtVol(vol)}</span>
+                  </div>
+                  <div className="h-1.5 bg-zinc-800 rounded-sm overflow-hidden">
+                    <div
+                      style={{ width: `${(vol / vpTooltip.maxVol) * 100}%`, backgroundColor: color }}
+                      className="h-full rounded-sm"
+                    />
+                  </div>
+                </div>
+              ))}
+              {/* Stats */}
+              <div className="pt-1 border-t border-white/5 space-y-1">
+                {[
+                  {
+                    label: 'Delta',
+                    val: fmtVol(vpTooltip.bin.buy_vol - vpTooltip.bin.sell_vol),
+                    color: vpTooltip.bin.buy_vol >= vpTooltip.bin.sell_vol ? '#00E676' : '#FF3B30',
+                    prefix: vpTooltip.bin.buy_vol >= vpTooltip.bin.sell_vol ? '+' : '',
+                  },
+                  { label: 'Total Vol', val: fmtVol(vpTooltip.bin.total_vol), color: '#D4D4D8' },
+                  { label: '% of Peak', val: `${((vpTooltip.bin.total_vol / vpTooltip.maxVol) * 100).toFixed(1)}%`, color: '#A1A1AA' },
+                ].map(({ label, val, color, prefix = '' }) => (
+                  <div key={label} className="flex justify-between">
+                    <span className="text-zinc-500">{label}</span>
+                    <span style={{ color }}>{prefix}{val}</span>
+                  </div>
+                ))}
+              </div>
+            </div>
+          </div>
+        )}
+        
+        {/* Strategy Overlay Component */}
+        <StrategyOverlay 
+          chart={chartRef.current}
+          bars={stockData?.bars}
+          strategyData={strategyData}
+          strategyType={activeStrategy}
+          isActive={!!activeStrategy && !!strategyData}
+        />
+        
+        {/* Timeframe Levels - Always visible */}
+        <TimeframeLevels 
+          series={candlestickSeriesRef.current}
+          bars={stockData?.bars}
+        />
+      </div>
+
+      {/* Status bar */}
+      {selectMode && (
+        <div className="px-3 py-1 border-t border-slate-200 dark:border-white/10 bg-slate-50 dark:bg-[#141414] text-[10px] font-mono text-[#F5A623] shrink-0">
+          Click on chart to select {selectMode === 'high' ? 'swing high' : 'swing low'} point
+        </div>
+      )}
+      {isMovingMode && pivotPoint && (
+        <div className="px-3 py-1 border-t border-slate-200 dark:border-white/10 bg-slate-50 dark:bg-[#141414] text-[10px] font-mono text-[#F5A623] shrink-0">
+          Click anywhere on chart to move pivot
+        </div>
+      )}
+
+      {/* Groww Trade modal */}
+      {showTrade && selectedStock && (
+        <GrowwTradeModal
+          ticker={selectedStock.ticker}
+          currentPrice={stockData?.bars?.length ? stockData.bars[stockData.bars.length - 1].close : null}
+          onClose={() => setShowTrade(false)}
+        />
+      )}
+    </div>
+  );
+};
+
+export default ChartPanel;
