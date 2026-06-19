@@ -129,6 +129,7 @@ async def state():
         "grace_days":       s.grace_days,
         "config":           hybrid_brain.config,
         "brain_enabled":    hybrid_brain.brain_enabled,
+        "training_mode":    hybrid_brain.training_mode,
         "as_of":            datetime.now(timezone.utc).isoformat(),
     }
 
@@ -163,6 +164,32 @@ async def toggle_brain(body: dict = {}):
     return {
         "brain_enabled": hybrid_brain.brain_enabled,
         "message": f"Hybrid Brain {'ENABLED' if hybrid_brain.brain_enabled else 'DISABLED'}",
+    }
+
+
+@router.post("/training-mode")
+async def training_mode(body: dict = {}):
+    """
+    Training Mode ON/OFF.
+    Body: {'enabled': bool}  (optional — agar nahi diya to toggle hoga)
+    """
+    if "enabled" in body:
+        result = hybrid_brain.set_training_mode(bool(body["enabled"]))
+    else:
+        result = hybrid_brain.toggle_training_mode()
+    return {
+        "training_mode": result["training_mode"],
+        "status": result["status"],
+        "message": f"Training Mode {result['status']}",
+    }
+
+
+@router.get("/training-mode")
+async def training_mode_status():
+    """Current Training Mode status."""
+    return {
+        "training_mode": hybrid_brain.training_mode,
+        "status": "ON" if hybrid_brain.training_mode else "OFF",
     }
 
 

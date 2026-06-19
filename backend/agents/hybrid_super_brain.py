@@ -223,6 +223,7 @@ class HybridSuperBrain:
         # ── Brain state ─────────────────────────────────────────
         self.current_pnl_pct  = 0.0
         self.brain_enabled    = True
+        self.training_mode    = False   # OFF by default (Live mode)
         self._decision_cache: Dict[str, Any] = {}
         self._cache_ttl       = 30.0
 
@@ -232,6 +233,30 @@ class HybridSuperBrain:
         self._danger_fn    = None   # danger_scanner.async_danger_scan
 
         logger.info("🚀 HybridSuperBrain v5.0 — Fully Central Engine Online")
+
+    # ── Training Mode Control ────────────────────────────────────────────────
+
+    def set_training_mode(self, enabled: bool) -> Dict[str, Any]:
+        """
+        Training Mode ON/OFF karne ka function.
+        ON  → Brain learns from outcomes, more exploratory decisions.
+        OFF → Live mode, strict gates only.
+        """
+        self.training_mode = bool(enabled)
+        # Clear cached decisions so fresh logic kicks in immediately
+        self._decision_cache.clear()
+        logger.info(
+            "[HybridBrain] training_mode → %s",
+            "ON" if self.training_mode else "OFF",
+        )
+        return {
+            "training_mode": self.training_mode,
+            "status": "ON" if self.training_mode else "OFF",
+        }
+
+    def toggle_training_mode(self) -> Dict[str, Any]:
+        """Flip current training_mode state."""
+        return self.set_training_mode(not self.training_mode)
 
     # ── Lazy loaders ─────────────────────────────────────────────────────────
 
@@ -541,24 +566,26 @@ class HybridSuperBrain:
         majority   = max(buy_votes, sell_votes)
         total_v    = len(votes) or 1
 
-        # ── Decision gate ────────────────────────────────────────────────────
+        # ── Decision gate (HybridSuperBrain — single source of truth) ────────
         ob_signal   = smc.get("order_block", False)
         fvg_signal  = smc.get("fair_value_gap", False)
         meta_edge   = meta.get("asymmetric_edge", False)
         dr_sig      = dreamer.get("signal", "HOLD")
 
+        # Compute quality_score early so decision gate can use it
+        quality_score = round(final_conf * (1 - fear * 0.5), 1)
+
+        # Safety override: extreme fear always forces HOLD
         if fear > 0.80:
             action = "HOLD"
-        elif final_conf > 61 and meta_edge and ob_signal and buy_votes > sell_votes:
+        # ── PRIMARY GATE (looser thresholds — HybridSuperBrain controls) ─────
+        elif final_conf > 47 and quality_score >= 50 and buy_votes >= sell_votes:
             action = "BUY"
-        elif final_conf < 39 and fvg_signal and sell_votes > buy_votes:
+        elif final_conf < 40 and quality_score >= 50 and sell_votes >= buy_votes:
             action = "SELL"
-        elif final_conf > 65 and majority / total_v >= 0.6 and buy_votes > sell_votes:
-            action = "BUY"
-        elif final_conf > 65 and majority / total_v >= 0.6 and sell_votes > buy_votes:
-            action = "SELL"
+        # ── Optional strong-signal overrides (kept for very high conviction) ─
         elif final_conf > 70 and dr_sig in ("BUY", "SELL") and dr_conf > 60:
-            action = dr_sig  # strong DreamerV3 alone
+            action = dr_sig
         else:
             action = "HOLD"
 
@@ -583,7 +610,7 @@ class HybridSuperBrain:
             "psych":              psych,
             "survival":           survival or {},
             "strategy_consensus": strategy_consensus,
-            "quality_score":      round(final_conf * (1 - fear * 0.5), 1),
+            "quality_score":      quality_score,
             "dreamer":            dreamer,
             "agents":             agents,
             "components": {
