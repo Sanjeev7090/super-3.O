@@ -79,6 +79,49 @@ const SMC_TF_FEATURE_MAP = {
 // Default auto-marked layers when a new stock is selected.
 const SMC_AUTO_DEFAULT_LAYERS = ['4H', '1H', '15M'];
 
+// ── EMA helpers ────────────────────────────────────────────────────
+// EMA = Exponential Moving Average. Period 9 = fast (lower-TF candle avg),
+// Period 21 = slow (higher-TF candle avg). Crossovers generate BUY/SELL signals.
+const EMA_FAST_COLOR = '#22D3EE'; // cyan — 9 EMA
+const EMA_SLOW_COLOR = '#F59E0B'; // amber — 21 EMA
+function computeEMA(values, period) {
+  if (!values || values.length < period) return new Array(values?.length || 0).fill(null);
+  const k = 2 / (period + 1);
+  const out = new Array(values.length).fill(null);
+  let sum = 0;
+  for (let i = 0; i < period; i++) sum += values[i];
+  let ema = sum / period;
+  out[period - 1] = ema;
+  for (let i = period; i < values.length; i++) {
+    ema = (values[i] - ema) * k + ema;
+    out[i] = ema;
+  }
+  return out;
+}
+function hexToRgba(hex, opacity) {
+  const r = parseInt(hex.slice(1, 3), 16);
+  const g = parseInt(hex.slice(3, 5), 16);
+  const b = parseInt(hex.slice(5, 7), 16);
+  return `rgba(${r},${g},${b},${opacity})`;
+}
+// Find the most recent EMA crossover within the last `lookback` bars.
+// Returns { type:'BUY'|'SELL', time, price, barsAgo } or null.
+function detectEmaCross(bars, ema9, ema21, lookback = 5) {
+  const n = bars.length;
+  for (let i = n - 1; i > Math.max(0, n - lookback - 1); i--) {
+    const prev9 = ema9[i - 1], prev21 = ema21[i - 1];
+    const cur9 = ema9[i], cur21 = ema21[i];
+    if (prev9 == null || prev21 == null || cur9 == null || cur21 == null) continue;
+    if (prev9 <= prev21 && cur9 > cur21) {
+      return { type: 'BUY', time: bars[i].timestamp / 1000, price: bars[i].close, barsAgo: n - 1 - i };
+    }
+    if (prev9 >= prev21 && cur9 < cur21) {
+      return { type: 'SELL', time: bars[i].timestamp / 1000, price: bars[i].close, barsAgo: n - 1 - i };
+    }
+  }
+  return null;
+}
+
 // ── SMC Auto Mark: compute FVG / Liquidity / Order Blocks ─────────
 function computeSMCData(bars) {
   const n = bars.length;
@@ -362,6 +405,9 @@ const ChartPanel = ({
   const smcCanvasRef = useRef(null);
   const smcDataRef   = useRef(null);
   const smcAnimRef   = useRef(null);
+  // EMA Cross refs
+  const ema9SeriesRef  = useRef(null);
+  const ema21SeriesRef = useRef(null);
   // Trade Signal (Parity Scanner) price lines
   const tradeSignalLinesRef = useRef([]);
   const [smcActive, setSmcActive] = useState(true);
@@ -371,6 +417,13 @@ const ChartPanel = ({
   const smcTfBtnRef = useRef(null);
   const [smcTfDropdownPos, setSmcTfDropdownPos] = useState({ top: 0, left: 0 });
   const smcLayerCacheRef = useRef({});
+  // EMA Cross indicator — 9 EMA vs 21 EMA
+  const [emaActive, setEmaActive] = useState(true);
+  const [emaOpacity, setEmaOpacity] = useState(0.85);
+  const [emaSignal, setEmaSignal] = useState(null);
+  const [emaCtrlOpen, setEmaCtrlOpen] = useState(false);
+  const emaCtrlRef = useRef(null);
+  const emaCtrlBtnRef = useRef(null);
   const [isFullscreen, setIsFullscreen] = useState(false);
   const [selectMode, setSelectMode] = useState(null);
   const [showGannLines, setShowGannLines] = useState(true);
@@ -1154,6 +1207,25 @@ const ChartPanel = ({
         wickUpColor: '#00E676', wickDownColor: '#FF3B30',
       });
       candlestickSeriesRef.current = cs;
+
+      // EMA 9 (fast) + EMA 21 (slow) line series — always-on indicator
+      ema9SeriesRef.current = chart.addLineSeries({
+        color: hexToRgba(EMA_FAST_COLOR, 0.85),
+        lineWidth: 2,
+        priceLineVisible: false,
+        lastValueVisible: true,
+        title: 'EMA 9',
+        crosshairMarkerVisible: false,
+      });
+      ema21SeriesRef.current = chart.addLineSeries({
+        color: hexToRgba(EMA_SLOW_COLOR, 0.85),
+        lineWidth: 2,
+        priceLineVisible: false,
+        lastValueVisible: true,
+        title: 'EMA 21',
+        crosshairMarkerVisible: false,
+      });
+
       chart.timeScale().fitContent();
 
       handleResize = () => {
@@ -1212,6 +1284,68 @@ const ChartPanel = ({
     candlestickSeriesRef.current.setData(chartData);
     chartRef.current.timeScale().fitContent();
   }, [stockData]);
+
+  // ── EMA 9 / 21 update + crossover detection ────────────────────
+  useEffect(() => {
+    if (!stockData?.bars?.length || !ema9SeriesRef.current || !ema21SeriesRef.current) return;
+    const bars = stockData.bars;
+    const closes = bars.map(b => b.close);
+    const ema9  = computeEMA(closes, 9);
+    const ema21 = computeEMA(closes, 21);
+
+    const ema9Data = [];
+    const ema21Data = [];
+    for (let i = 0; i < bars.length; i++) {
+      const t = bars[i].timestamp / 1000;
+      if (ema9[i]  != null) ema9Data.push({  time: t, value: ema9[i]  });
+      if (ema21[i] != null) ema21Data.push({ time: t, value: ema21[i] });
+    }
+    ema9SeriesRef.current.setData(ema9Data);
+    ema21SeriesRef.current.setData(ema21Data);
+
+    // Crossover detection — pick most recent cross within last 5 bars
+    const sig = detectEmaCross(bars, ema9, ema21, 5);
+    setEmaSignal(sig);
+
+    // Drop a marker on the candlestick series at the cross bar (only the latest)
+    if (sig && candlestickSeriesRef.current) {
+      try {
+        candlestickSeriesRef.current.setMarkers([{
+          time: sig.time,
+          position: sig.type === 'BUY' ? 'belowBar' : 'aboveBar',
+          color: sig.type === 'BUY' ? '#10B981' : '#EF4444',
+          shape: sig.type === 'BUY' ? 'arrowUp' : 'arrowDown',
+          text: sig.type === 'BUY' ? 'BUY 9/21' : 'SELL 9/21',
+        }]);
+      } catch (e) { /* ignore */ }
+    } else if (candlestickSeriesRef.current) {
+      try { candlestickSeriesRef.current.setMarkers([]); } catch (e) { /* ignore */ }
+    }
+  }, [stockData]);
+
+  // ── EMA: toggle visibility ─────────────────────────────────────
+  useEffect(() => {
+    if (ema9SeriesRef.current)  ema9SeriesRef.current.applyOptions({  visible: emaActive });
+    if (ema21SeriesRef.current) ema21SeriesRef.current.applyOptions({ visible: emaActive });
+  }, [emaActive]);
+
+  // ── EMA: opacity slider → update line colors ───────────────────
+  useEffect(() => {
+    if (ema9SeriesRef.current)  ema9SeriesRef.current.applyOptions({  color: hexToRgba(EMA_FAST_COLOR, emaOpacity) });
+    if (ema21SeriesRef.current) ema21SeriesRef.current.applyOptions({ color: hexToRgba(EMA_SLOW_COLOR, emaOpacity) });
+  }, [emaOpacity]);
+
+  // ── EMA control popover: close on outside click ───────────────
+  useEffect(() => {
+    const handler = (e) => {
+      if (
+        !(emaCtrlBtnRef.current && emaCtrlBtnRef.current.contains(e.target)) &&
+        !(emaCtrlRef.current    && emaCtrlRef.current.contains(e.target))
+      ) setEmaCtrlOpen(false);
+    };
+    document.addEventListener('click', handler);
+    return () => document.removeEventListener('click', handler);
+  }, []);
 
   // ── Parity Trade Signal Lines (Buy/Sell/SL/Target) ────────────
   useEffect(() => {
@@ -1516,6 +1650,67 @@ const ChartPanel = ({
             <ChartLine size={12} weight="bold" />
             <span className="hidden sm:inline">GANN</span>
           </button>
+          {/* EMA 9/21 toggle + opacity slider */}
+          <div className="flex items-stretch shrink-0 relative">
+            <button
+              onClick={() => setEmaActive(!emaActive)}
+              className={`px-2 py-1 text-[10px] font-bold uppercase tracking-wider transition-all whitespace-nowrap border ${
+                emaActive
+                  ? 'text-[#22D3EE] border-[#22D3EE]/40 bg-[#22D3EE]/8'
+                  : 'text-zinc-500 border-transparent'
+              }`}
+              data-testid="ema-toggle"
+              title="EMA 9 (fast) vs EMA 21 (slow) crossover — BUY/SELL live signal"
+            >
+              EMA 9/21
+            </button>
+            <button
+              ref={emaCtrlBtnRef}
+              onClick={() => setEmaCtrlOpen(o => !o)}
+              className={`px-1.5 py-1 text-[9px] font-bold uppercase tracking-wider transition-all whitespace-nowrap border border-l-0 flex items-center gap-0.5 ${
+                emaActive
+                  ? 'text-[#22D3EE] border-[#22D3EE]/40 bg-[#22D3EE]/8'
+                  : 'text-zinc-400 border-[#22D3EE]/30 bg-[#22D3EE]/4'
+              }`}
+              data-testid="ema-opacity-toggle"
+              title="Adjust EMA line opacity"
+            >
+              {Math.round(emaOpacity * 100)}%
+              <span className="text-[8px] leading-none">▾</span>
+            </button>
+            {emaCtrlOpen && (
+              <div
+                ref={emaCtrlRef}
+                className="absolute z-50 top-full right-0 mt-1 bg-black/95 border border-[#22D3EE]/40 rounded shadow-2xl p-3 min-w-[180px]"
+                data-testid="ema-opacity-popover"
+              >
+                <div className="text-[9px] text-zinc-400 uppercase tracking-wider mb-2 flex items-center justify-between">
+                  <span>EMA Line Opacity</span>
+                  <span className="text-[#22D3EE] font-bold">{Math.round(emaOpacity * 100)}%</span>
+                </div>
+                <input
+                  type="range"
+                  min="10"
+                  max="100"
+                  step="5"
+                  value={Math.round(emaOpacity * 100)}
+                  onChange={(e) => setEmaOpacity(Number(e.target.value) / 100)}
+                  className="w-full accent-[#22D3EE]"
+                  data-testid="ema-opacity-slider"
+                />
+                <div className="mt-2 flex items-center justify-between text-[9px]">
+                  <span className="flex items-center gap-1.5">
+                    <span className="inline-block w-3 h-0.5" style={{ background: hexToRgba(EMA_FAST_COLOR, emaOpacity) }}/>
+                    <span className="text-zinc-300">EMA 9 (fast)</span>
+                  </span>
+                  <span className="flex items-center gap-1.5">
+                    <span className="inline-block w-3 h-0.5" style={{ background: hexToRgba(EMA_SLOW_COLOR, emaOpacity) }}/>
+                    <span className="text-zinc-300">EMA 21 (slow)</span>
+                  </span>
+                </div>
+              </div>
+            )}
+          </div>
           {/* SMC toggle + Multi-Timeframe layers dropdown */}
           <div className="flex items-stretch shrink-0 relative">
             <button
@@ -1762,6 +1957,27 @@ const ChartPanel = ({
             <span className="text-slate-300">E: {tradeSignal.entry}</span>
             <span className="text-red-400">SL: {tradeSignal.sl}</span>
             <span className="text-emerald-400">T: {tradeSignal.target}</span>
+          </div>
+        )}
+
+        {/* EMA 9/21 Live Cross Signal Pill — top center overlay */}
+        {emaActive && emaSignal && (
+          <div
+            className={`absolute top-2 left-1/2 -translate-x-1/2 z-20 flex items-center gap-2 px-3 py-1.5 rounded-lg text-xs font-bold shadow-lg border backdrop-blur-sm animate-pulse
+              ${emaSignal.type === 'BUY'
+                ? 'bg-emerald-900/85 border-emerald-400/60 text-emerald-200'
+                : 'bg-rose-900/85 border-rose-400/60 text-rose-200'}`}
+            data-testid="ema-cross-signal"
+          >
+            <span className="text-base leading-none">
+              {emaSignal.type === 'BUY' ? '▲' : '▼'}
+            </span>
+            <span>{emaSignal.type === 'BUY' ? 'BUY' : 'SELL'} · 9/21 EMA</span>
+            <span className="text-white/60">|</span>
+            <span className="text-slate-200">@ {Number(emaSignal.price).toFixed(2)}</span>
+            {emaSignal.barsAgo > 0 && (
+              <span className="text-white/50 text-[10px]">({emaSignal.barsAgo} bar{emaSignal.barsAgo > 1 ? 's' : ''} ago)</span>
+            )}
           </div>
         )}
 
