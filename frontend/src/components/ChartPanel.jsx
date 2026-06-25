@@ -59,9 +59,25 @@ const SMC_TF_OPTIONS = [
   { label: '1D',   minutes: 1440 },
   { label: '4H',   minutes: 240  },
   { label: '1H',   minutes: 60   },
+  { label: '15M',  minutes: 15   },
   { label: '5M',   minutes: 5    },
   { label: '3M',   minutes: 3    },
 ];
+
+// ── SMC Role-based feature map per timeframe ──────────────────────
+// Defines which SMC features are surfaced from each TF layer.
+//   4H  → direction (BOS/CHOCH), key levels (PD zone), supply, demand
+//   1H  → BOS, order blocks, FVG, liquidity (swings)
+//   15M → reversal (manipulations) + confirmation (refinedEntries + wyckoff phases)
+// Layers not listed (AUTO/1D/5M/3M) show every feature (manual user picks).
+const SMC_TF_FEATURE_MAP = {
+  '4H':  new Set(['supplyZones', 'demandZones', 'bosChoch', 'pdZone']),
+  '1H':  new Set(['bosChoch', 'obs', 'fvgs', 'swings']),
+  '15M': new Set(['manipulations', 'refinedEntries', 'wyckoffPhases']),
+};
+
+// Default auto-marked layers when a new stock is selected.
+const SMC_AUTO_DEFAULT_LAYERS = ['4H', '1H', '15M'];
 
 // ── SMC Auto Mark: compute FVG / Liquidity / Order Blocks ─────────
 function computeSMCData(bars) {
@@ -349,10 +365,11 @@ const ChartPanel = ({
   // Trade Signal (Parity Scanner) price lines
   const tradeSignalLinesRef = useRef([]);
   const [smcActive, setSmcActive] = useState(true);
-  const [smcLayers, setSmcLayers] = useState(() => new Set(['AUTO']));
+  const [smcLayers, setSmcLayers] = useState(() => new Set(SMC_AUTO_DEFAULT_LAYERS));
   const [smcTfOpen, setSmcTfOpen] = useState(false);
   const smcTfDropdownRef = useRef(null);
   const smcTfBtnRef = useRef(null);
+  const [smcTfDropdownPos, setSmcTfDropdownPos] = useState({ top: 0, left: 0 });
   const smcLayerCacheRef = useRef({});
   const [isFullscreen, setIsFullscreen] = useState(false);
   const [selectMode, setSelectMode] = useState(null);
@@ -1279,6 +1296,14 @@ const ChartPanel = ({
     smcDataRef.current = null;
   };
 
+  // ── SMC: when a new stock is selected, auto-mark default TF layers ─
+  // 4H direction/levels/supply-demand · 1H BOS/OB/FVG/liquidity · 15M reversal/confirmation
+  useEffect(() => {
+    if (!selectedStock) return;
+    setSmcLayers(new Set(SMC_AUTO_DEFAULT_LAYERS));
+    setSmcActive(true);
+  }, [selectedStock]);
+
   // ── SMC: compute each active layer when bars or layer-set change ─
   useEffect(() => {
     if (!stockData?.bars?.length || smcLayers.size === 0) {
@@ -1299,6 +1324,16 @@ const ChartPanel = ({
         if (Array.isArray(smc[k])) smc[k] = smc[k].map(x => ({ ...x, _tf: label }));
       });
       if (smc.pdZone) smc.pdZone = { ...smc.pdZone, _tf: label };
+
+      // Per-TF feature whitelist: only keep features that belong to this TF's role.
+      const allow = SMC_TF_FEATURE_MAP[label];
+      if (allow) {
+        ['fvgs','swings','obs','bosChoch','supplyZones','demandZones',
+         'wyckoffPhases','manipulations','refinedEntries'].forEach(k => {
+          if (!allow.has(k)) smc[k] = [];
+        });
+        if (!allow.has('pdZone')) smc.pdZone = null;
+      }
       cache[label] = smc;
     });
     smcLayerCacheRef.current = cache;
@@ -1497,7 +1532,15 @@ const ChartPanel = ({
             </button>
             <button
               ref={smcTfBtnRef}
-              onClick={() => setSmcTfOpen(o => !o)}
+              onClick={() => {
+                if (!smcTfOpen && smcTfBtnRef.current) {
+                  const rect = smcTfBtnRef.current.getBoundingClientRect();
+                  const dropW = 130;
+                  const left = Math.min(rect.left, window.innerWidth - dropW - 8);
+                  setSmcTfDropdownPos({ top: rect.bottom + 4, left: Math.max(8, left) });
+                }
+                setSmcTfOpen(o => !o);
+              }}
               className={`px-1.5 py-1 text-[9px] font-bold uppercase tracking-wider transition-all whitespace-nowrap border border-l-0 flex items-center gap-0.5 ${
                 smcActive && smcLayers.size > 0
                   ? 'text-[#F5A623] border-[#F5A623]/40 bg-[#F5A623]/8'
@@ -1516,7 +1559,16 @@ const ChartPanel = ({
             {smcTfOpen && (
               <div
                 ref={smcTfDropdownRef}
-                className="absolute z-50 top-full left-0 mt-1 bg-black/95 border border-[#F5A623]/40 rounded shadow-2xl py-1 min-w-[110px]"
+                className="bg-black/95 border border-[#F5A623]/40 rounded shadow-2xl py-1"
+                style={{
+                  position: 'fixed',
+                  top: smcTfDropdownPos.top,
+                  left: smcTfDropdownPos.left,
+                  zIndex: 9999,
+                  minWidth: 130,
+                  maxHeight: 360,
+                  overflowY: 'auto',
+                }}
                 data-testid="smc-tf-dropdown"
               >
                 <div className="px-2 py-1 text-[8px] text-zinc-500 uppercase tracking-wider border-b border-white/5">
