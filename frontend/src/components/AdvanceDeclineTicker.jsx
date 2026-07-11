@@ -18,6 +18,7 @@ export default function AdvanceDeclineTicker() {
   // Full-screen run state
   const [run, setRun] = useState(null);
   const runRef = useRef(null);
+  const partContainerRef = useRef(null);
 
   const fetchAD = useCallback(async () => {
     try {
@@ -103,6 +104,63 @@ export default function AdvanceDeclineTicker() {
     });
     anim.onfinish = () => setRun(null);
     return () => { try { anim.cancel(); } catch (e) { /* ignore */ } };
+  }, [run]);
+
+  // Particle trail spawner during a run — bull → green sparkles, bear → red smoke
+  useEffect(() => {
+    if (!run || !runRef.current || !partContainerRef.current) return;
+    const el = runRef.current;
+    const cont = partContainerRef.current;
+    const isBull = run.animal === '🐂';
+    const kind = isBull ? 'sparkle' : 'smoke';
+    let raf = null;
+    let lastSpawn = 0;
+    const startTs = performance.now();
+    const SPAWN_MS = kind === 'sparkle' ? 38 : 55;
+
+    const spawn = (cx, cy) => {
+      const p = document.createElement('div');
+      p.className = `ad-particle ${kind}`;
+      // Random offset — bear-side of the animal (opposite to travel direction)
+      const behindDir = run.rtl ? 1 : -1; // if going right (!rtl), spawn slightly to the left
+      const dx = behindDir * (10 + Math.random() * 30);
+      const dy = 6 + Math.random() * 30;
+      const size = kind === 'sparkle'
+        ? 4 + Math.random() * 6           // 4–10 px
+        : 14 + Math.random() * 22;        // 14–36 px
+      p.style.left = `${cx + dx}px`;
+      p.style.top  = `${cy + dy}px`;
+      p.style.width  = `${size}px`;
+      p.style.height = `${size}px`;
+      // Random drift for animation
+      const driftX = (Math.random() - 0.5) * 40 + behindDir * 30;
+      const driftY = -20 - Math.random() * 40;
+      p.style.setProperty('--dx', `${driftX}px`);
+      p.style.setProperty('--dy', `${driftY}px`);
+      p.style.setProperty('--rot', `${(Math.random() - 0.5) * 180}deg`);
+      p.addEventListener('animationend', () => p.remove(), { once: true });
+      cont.appendChild(p);
+    };
+
+    const step = (ts) => {
+      if (ts - lastSpawn > SPAWN_MS) {
+        lastSpawn = ts;
+        const rect = el.getBoundingClientRect();
+        if (rect.width > 0 && rect.height > 0) {
+          // Emit from lower-back region of the animal (tail area)
+          const cx = rect.left + rect.width * (run.rtl ? 0.85 : 0.15);
+          const cy = rect.top  + rect.height * 0.72;
+          // Multi-emit per frame for extra density
+          const emits = kind === 'sparkle' ? 2 : 1;
+          for (let i = 0; i < emits; i++) spawn(cx, cy);
+        }
+      }
+      if (ts - startTs < run.duration - 250) {
+        raf = requestAnimationFrame(step);
+      }
+    };
+    raf = requestAnimationFrame(step);
+    return () => { if (raf) cancelAnimationFrame(raf); };
   }, [run]);
 
   if (loading && !data) {
@@ -275,6 +333,39 @@ export default function AdvanceDeclineTicker() {
             drop-shadow(0 3px 0 rgba(255,255,255,0.25))
             drop-shadow(8px 16px 22px rgba(0,0,0,0.55));
         }
+
+        /* Particle trail — bull sparkles / bear smoke */
+        .ad-particle {
+          position: absolute;
+          border-radius: 50%;
+          pointer-events: none;
+          will-change: transform, opacity;
+          --dx: 0px;
+          --dy: -30px;
+          --rot: 0deg;
+        }
+        .ad-particle.sparkle {
+          background: radial-gradient(circle, #B8FFCF 0%, #00E676 40%, rgba(0,230,118,0) 70%);
+          box-shadow: 0 0 10px #00E676, 0 0 22px rgba(0,230,118,0.55);
+          animation: ad-sparkle-life 950ms cubic-bezier(0.22,0.61,0.36,1) forwards;
+        }
+        .ad-particle.smoke {
+          background: radial-gradient(circle, rgba(255,120,90,0.85) 0%, rgba(255,59,48,0.4) 42%, rgba(255,59,48,0) 75%);
+          filter: blur(3px);
+          animation: ad-smoke-life 1200ms ease-out forwards;
+        }
+        @keyframes ad-sparkle-life {
+          0%   { transform: translate(0, 0)          scale(0.4) rotate(0deg);     opacity: 0; }
+          25%  { transform: translate(calc(var(--dx)*0.3), calc(var(--dy)*0.3))
+                             scale(1.15) rotate(calc(var(--rot)*0.4)); opacity: 1; }
+          100% { transform: translate(var(--dx), var(--dy)) scale(0.2) rotate(var(--rot)); opacity: 0; }
+        }
+        @keyframes ad-smoke-life {
+          0%   { transform: translate(0, 0)          scale(0.5); opacity: 0.85; }
+          40%  { transform: translate(calc(var(--dx)*0.4), calc(var(--dy)*0.4))
+                             scale(1.6); opacity: 0.55; }
+          100% { transform: translate(var(--dx), var(--dy)) scale(2.4); opacity: 0; }
+        }
       `}</style>
 
       {/* Full-screen 3D run overlay — appears every 2 minutes */}
@@ -284,10 +375,17 @@ export default function AdvanceDeclineTicker() {
           style={{ perspective: '900px' }}
           data-testid="ad-fullscreen-run"
         >
+          {/* Particle trail container (below the animal in z) */}
+          <div
+            ref={partContainerRef}
+            className="absolute inset-0 pointer-events-none"
+            style={{ zIndex: 0 }}
+          />
           <div
             ref={runRef}
             key={run.key}
             className="ad-fullscreen-3d"
+            style={{ zIndex: 1 }}
           >
             {run.animal}
           </div>
