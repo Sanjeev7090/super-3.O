@@ -758,3 +758,165 @@ async def get_status():
         "today_run":        today_doc,
         "total_records":    total,
     }
+
+
+# ─── NIFTY 50 Advance / Decline Ratio ─────────────────────────────────
+# Source: yfinance batch download of NIFTY 50 constituents (last-close vs prev-close).
+# Cached for 60 s to keep the top ticker snappy.
+NIFTY_50_TICKERS = [
+    ("RELIANCE",   "Reliance Industries"),
+    ("TCS",        "Tata Consultancy Services"),
+    ("HDFCBANK",   "HDFC Bank"),
+    ("INFY",       "Infosys"),
+    ("ICICIBANK",  "ICICI Bank"),
+    ("HINDUNILVR", "Hindustan Unilever"),
+    ("SBIN",       "State Bank of India"),
+    ("BHARTIARTL", "Bharti Airtel"),
+    ("ITC",        "ITC"),
+    ("LT",         "Larsen & Toubro"),
+    ("KOTAKBANK",  "Kotak Mahindra Bank"),
+    ("AXISBANK",   "Axis Bank"),
+    ("BAJFINANCE", "Bajaj Finance"),
+    ("MARUTI",     "Maruti Suzuki"),
+    ("SUNPHARMA",  "Sun Pharma"),
+    ("TITAN",      "Titan Company"),
+    ("ASIANPAINT", "Asian Paints"),
+    ("ULTRACEMCO", "UltraTech Cement"),
+    ("WIPRO",      "Wipro"),
+    ("HCLTECH",    "HCL Technologies"),
+    ("NTPC",       "NTPC"),
+    ("POWERGRID",  "Power Grid"),
+    ("NESTLEIND",  "Nestle India"),
+    ("ONGC",       "ONGC"),
+    ("M&M",        "Mahindra & Mahindra"),
+    ("TATAMOTORS", "Tata Motors"),
+    ("TATASTEEL",  "Tata Steel"),
+    ("JSWSTEEL",   "JSW Steel"),
+    ("COALINDIA",  "Coal India"),
+    ("HINDALCO",   "Hindalco Industries"),
+    ("GRASIM",     "Grasim Industries"),
+    ("ADANIENT",   "Adani Enterprises"),
+    ("ADANIPORTS", "Adani Ports"),
+    ("BAJAJFINSV", "Bajaj Finserv"),
+    ("BAJAJ-AUTO", "Bajaj Auto"),
+    ("BRITANNIA",  "Britannia Industries"),
+    ("CIPLA",      "Cipla"),
+    ("DIVISLAB",   "Divi's Laboratories"),
+    ("DRREDDY",    "Dr. Reddy's Laboratories"),
+    ("EICHERMOT",  "Eicher Motors"),
+    ("HEROMOTOCO", "Hero MotoCorp"),
+    ("HDFCLIFE",   "HDFC Life"),
+    ("INDUSINDBK", "IndusInd Bank"),
+    ("SBILIFE",    "SBI Life Insurance"),
+    ("APOLLOHOSP", "Apollo Hospitals"),
+    ("TECHM",      "Tech Mahindra"),
+    ("TATACONSUM", "Tata Consumer Products"),
+    ("BEL",        "Bharat Electronics"),
+    ("SHRIRAMFIN", "Shriram Finance"),
+    ("TRENT",      "Trent"),
+]
+
+_ad_cache = {"ts": 0.0, "data": None}
+_AD_TTL_SEC = 60
+
+
+def _fetch_nifty50_ad_sync():
+    """Batch-fetch NIFTY 50 quotes via yfinance and compute A/D."""
+    import yfinance as yf
+    yf_symbols = [f"{s}.NS" for s, _ in NIFTY_50_TICKERS]
+    idx_symbol = "^NSEI"
+    all_symbols = yf_symbols + [idx_symbol]
+
+    df = yf.download(
+        all_symbols, period="5d", interval="1d",
+        progress=False, group_by="ticker", auto_adjust=False, threads=True,
+    )
+
+    stocks = []
+    advances = declines = unchanged = 0
+    for sym, name in NIFTY_50_TICKERS:
+        yfs = f"{sym}.NS"
+        try:
+            sub = df[yfs].dropna(subset=["Close"])
+            if len(sub) < 2:
+                continue
+            last  = float(sub["Close"].iloc[-1])
+            prev  = float(sub["Close"].iloc[-2])
+            change = last - prev
+            pct = (change / prev * 100.0) if prev else 0.0
+            volume = float(sub["Volume"].iloc[-1]) if "Volume" in sub.columns else 0.0
+            if   change >  0: advances  += 1; direction = "up"
+            elif change <  0: declines  += 1; direction = "down"
+            else:             unchanged += 1; direction = "flat"
+            stocks.append({
+                "symbol":     sym,
+                "name":       name,
+                "ltp":        round(last, 2),
+                "prev_close": round(prev, 2),
+                "change":     round(change, 2),
+                "change_pct": round(pct, 2),
+                "volume":     int(volume),
+                "direction":  direction,
+            })
+        except Exception:
+            continue
+
+    # Nifty 50 index snapshot
+    idx = {"value": None, "change": None, "change_pct": None}
+    try:
+        idx_df = df[idx_symbol].dropna(subset=["Close"])
+        if len(idx_df) >= 2:
+            iv = float(idx_df["Close"].iloc[-1])
+            ip = float(idx_df["Close"].iloc[-2])
+            idx = {
+                "value":      round(iv, 2),
+                "change":     round(iv - ip, 2),
+                "change_pct": round((iv - ip) / ip * 100.0, 2) if ip else 0.0,
+            }
+    except Exception:
+        pass
+
+    # Sort by change_pct descending for consumer convenience
+    stocks.sort(key=lambda x: x["change_pct"], reverse=True)
+
+    dominant = "bullish" if advances > declines else ("bearish" if declines > advances else "neutral")
+    return {
+        "index":       "NIFTY 50",
+        "advances":    advances,
+        "declines":    declines,
+        "unchanged":   unchanged,
+        "total":       len(stocks),
+        "dominant":    dominant,
+        "index_data":  idx,
+        "stocks":      stocks,
+        "source":      "yfinance",
+        "timestamp":   datetime.now(timezone.utc).isoformat(),
+    }
+
+
+@router.get("/advance-decline")
+async def get_advance_decline():
+    """
+    Live NIFTY 50 Advance/Decline ratio + per-stock LTP snapshot.
+    Cached 60s. Returns dominant='bullish' / 'bearish' / 'neutral'.
+    """
+    now = time.time()
+    if _ad_cache["data"] and (now - _ad_cache["ts"] < _AD_TTL_SEC):
+        return _ad_cache["data"]
+    try:
+        loop = asyncio.get_event_loop()
+        result = await loop.run_in_executor(None, _fetch_nifty50_ad_sync)
+        _ad_cache["ts"] = now
+        _ad_cache["data"] = result
+        return result
+    except Exception as e:
+        logger.exception("advance-decline fetch failed")
+        if _ad_cache["data"]:
+            return _ad_cache["data"]  # stale is fine
+        return {
+            "error": str(e),
+            "advances": 0, "declines": 0, "unchanged": 0, "total": 0,
+            "dominant": "neutral", "stocks": [], "source": "error",
+            "timestamp": datetime.now(timezone.utc).isoformat(),
+        }
+

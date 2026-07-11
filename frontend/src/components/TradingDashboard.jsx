@@ -28,6 +28,7 @@ import StockNewsPopup from './StockNewsPopup';
 import HybridDashboard from './hybrid/HybridDashboard';
 import GannQSCPanel from './GannQSCPanel';
 import RegulatoryWatchdogPanel from './RegulatoryWatchdogPanel';
+import AdvanceDeclineTicker from './AdvanceDeclineTicker';
 import NarrativeSwingAnalysis from './NarrativeSwingAnalysis';
 import HybridVWAPAnalysis from './HybridVWAPAnalysis';
 import RLAgentPanel from './RLAgentPanel';
@@ -731,6 +732,9 @@ const TradingDashboard = () => {
           )}
         </div>
       </header>
+
+      {/* NIFTY 50 Advance / Decline Ticker — animated bull/bear + live 50-stock modal */}
+      <AdvanceDeclineTicker />
 
       {/* Indices Live Ticker — NIFTY 50 / SENSEX / BANK NIFTY (tap → top options) */}
       <IndicesTickerBar onIndexClick={handleIndexClick} />
