@@ -84,7 +84,7 @@ const SMC_TF_FEATURE_MAP = {
 //   BLUE   → Continuation    (Marubozu / Three White Soldiers / Three Black Crows)
 const PATTERN_COLORS = {
   'bullish-reversal': '#FBBF24', // yellow-400
-  'bearish-reversal': '#F97316', // orange-500
+  'bearish-reversal': '#EC4899', // pink-500
   'continuation':     '#3B82F6', // blue-500
 };
 function detectCandlePatterns(bars) {
