@@ -76,6 +76,125 @@ const SMC_TF_FEATURE_MAP = {
   '15M': new Set(['manipulations', 'refinedEntries', 'wyckoffPhases']),
 };
 
+// ── Candlestick Pattern Detection ─────────────────────────────────
+// Detects classical Japanese candlestick patterns and tags each bar so the
+// chart can color-code candles:
+//   YELLOW → Bullish reversal (Hammer / Inv Hammer / Bull Engulfing / Morning Star / Piercing Line)
+//   ORANGE → Bearish reversal (Shooting Star / Bear Engulfing / Evening Star / Dark Cloud Cover)
+//   BLUE   → Continuation    (Marubozu / Three White Soldiers / Three Black Crows)
+const PATTERN_COLORS = {
+  'bullish-reversal': '#FBBF24', // yellow-400
+  'bearish-reversal': '#F97316', // orange-500
+  'continuation':     '#3B82F6', // blue-500
+};
+function detectCandlePatterns(bars) {
+  const n = bars ? bars.length : 0;
+  const tags = new Array(n).fill(null);
+  if (n < 3) return tags;
+
+  const body   = b => Math.abs(b.close - b.open);
+  const upW    = b => b.high - Math.max(b.open, b.close);
+  const lowW   = b => Math.min(b.open, b.close) - b.low;
+  const range  = b => b.high - b.low;
+  const isBull = b => b.close > b.open;
+  const isBear = b => b.close < b.open;
+
+  for (let i = 0; i < n; i++) {
+    const b = bars[i];
+    const r = range(b);
+    if (r <= 0) continue;
+    const bod = body(b);
+    const uw  = upW(b);
+    const lw  = lowW(b);
+
+    // ── Single-candle patterns ──
+    // Marubozu — very small wicks on both sides, huge body (continuation)
+    if (bod >= 0.9 * r) {
+      tags[i] = { name: isBull(b) ? 'Marubozu (Bull)' : 'Marubozu (Bear)', category: 'continuation' };
+    }
+
+    // Small-body candles with directional wicks
+    if (bod > 0 && bod <= r * 0.4) {
+      // Hammer — long lower wick, tiny upper wick → bullish reversal (after downtrend)
+      if (lw >= 2 * bod && uw <= bod) {
+        // Context: prior downtrend (last 3 bars trending down)
+        if (i >= 3 && bars[i - 1].close < bars[i - 3].close) {
+          tags[i] = { name: 'Hammer', category: 'bullish-reversal' };
+        } else if (!tags[i]) {
+          tags[i] = { name: 'Hammer (weak)', category: 'bullish-reversal' };
+        }
+      }
+      // Inverted Hammer / Shooting Star — long upper wick, tiny lower wick
+      if (uw >= 2 * bod && lw <= bod) {
+        // Context: uptrend → Shooting Star (bearish); downtrend → Inverted Hammer (bullish)
+        const uptrend = i >= 3 && bars[i - 1].close > bars[i - 3].close;
+        tags[i] = uptrend
+          ? { name: 'Shooting Star', category: 'bearish-reversal' }
+          : { name: 'Inverted Hammer', category: 'bullish-reversal' };
+      }
+    }
+
+    // ── Two-candle patterns ──
+    if (i >= 1) {
+      const p = bars[i - 1];
+      const pBod = body(p);
+
+      // Bullish Engulfing
+      if (isBear(p) && isBull(b) && b.close >= p.open && b.open <= p.close && bod > pBod) {
+        tags[i] = { name: 'Bullish Engulfing', category: 'bullish-reversal' };
+      }
+      // Bearish Engulfing
+      if (isBull(p) && isBear(b) && b.open >= p.close && b.close <= p.open && bod > pBod) {
+        tags[i] = { name: 'Bearish Engulfing', category: 'bearish-reversal' };
+      }
+      // Piercing Line — prev bear, cur bull opens below prev.close, closes above prev midpoint (below prev.open)
+      if (isBear(p) && isBull(b) && b.open < p.close && b.close > (p.open + p.close) / 2 && b.close < p.open) {
+        tags[i] = { name: 'Piercing Line', category: 'bullish-reversal' };
+      }
+      // Dark Cloud Cover — prev bull, cur bear opens above prev.close, closes below prev midpoint (above prev.open)
+      if (isBull(p) && isBear(b) && b.open > p.close && b.close < (p.open + p.close) / 2 && b.close > p.open) {
+        tags[i] = { name: 'Dark Cloud Cover', category: 'bearish-reversal' };
+      }
+    }
+
+    // ── Three-candle patterns ──
+    if (i >= 2) {
+      const c1 = bars[i - 2], c2 = bars[i - 1], c3 = b;
+      const c1Bod = body(c1), c2Bod = body(c2);
+      const c1Range = range(c1);
+
+      // Morning Star — bear long, small body, bull closing above midpoint of c1
+      if (isBear(c1) && c1Range > 0 && c1Bod > c1Range * 0.5 &&
+          c2Bod < c1Bod * 0.5 && isBull(c3) &&
+          c3.close > (c1.open + c1.close) / 2) {
+        tags[i] = { name: 'Morning Star', category: 'bullish-reversal' };
+      }
+      // Evening Star — bull long, small body, bear closing below midpoint of c1
+      if (isBull(c1) && c1Range > 0 && c1Bod > c1Range * 0.5 &&
+          c2Bod < c1Bod * 0.5 && isBear(c3) &&
+          c3.close < (c1.open + c1.close) / 2) {
+        tags[i] = { name: 'Evening Star', category: 'bearish-reversal' };
+      }
+      // Three White Soldiers — 3 consecutive bulls, each opening in prev body, each closing higher
+      if (isBull(c1) && isBull(c2) && isBull(c3) &&
+          c2.close > c1.close && c3.close > c2.close &&
+          c2.open > c1.open && c2.open < c1.close &&
+          c3.open > c2.open && c3.open < c2.close) {
+        tags[i] = { name: 'Three White Soldiers', category: 'continuation' };
+      }
+      // Three Black Crows — 3 consecutive bears, each opening in prev body, each closing lower
+      if (isBear(c1) && isBear(c2) && isBear(c3) &&
+          c2.close < c1.close && c3.close < c2.close &&
+          c2.open < c1.open && c2.open > c1.close &&
+          c3.open < c2.open && c3.open > c2.close) {
+        tags[i] = { name: 'Three Black Crows', category: 'continuation' };
+      }
+    }
+  }
+
+  return tags;
+}
+
 // Default auto-marked layers when a new stock is selected.
 const SMC_AUTO_DEFAULT_LAYERS = ['4H', '1H', '15M'];
 
@@ -419,11 +538,10 @@ const ChartPanel = ({
   const smcLayerCacheRef = useRef({});
   // EMA Cross indicator — 9 EMA vs 21 EMA
   const [emaActive, setEmaActive] = useState(true);
-  const [emaOpacity, setEmaOpacity] = useState(0.85);
   const [emaSignal, setEmaSignal] = useState(null);
-  const [emaCtrlOpen, setEmaCtrlOpen] = useState(false);
-  const emaCtrlRef = useRef(null);
-  const emaCtrlBtnRef = useRef(null);
+  // Candlestick Pattern highlighting (Y/O/Blue color coding)
+  const [patternsActive, setPatternsActive] = useState(true);
+  const [lastPattern, setLastPattern] = useState(null);
   const [isFullscreen, setIsFullscreen] = useState(false);
   const [selectMode, setSelectMode] = useState(null);
   const [showGannLines, setShowGannLines] = useState(true);
@@ -1280,10 +1398,27 @@ const ChartPanel = ({
 
   useEffect(() => {
     if (!stockData || !candlestickSeriesRef.current) return;
-    const chartData = stockData.bars.map(bar => ({ time: bar.timestamp / 1000, open: bar.open, high: bar.high, low: bar.low, close: bar.close }));
+    const bars = stockData.bars;
+    const patterns = patternsActive ? detectCandlePatterns(bars) : new Array(bars.length).fill(null);
+    const chartData = bars.map((bar, i) => {
+      const base = { time: bar.timestamp / 1000, open: bar.open, high: bar.high, low: bar.low, close: bar.close };
+      const t = patterns[i];
+      if (t && PATTERN_COLORS[t.category]) {
+        const c = PATTERN_COLORS[t.category];
+        return { ...base, color: c, borderColor: c, wickColor: c };
+      }
+      return base;
+    });
     candlestickSeriesRef.current.setData(chartData);
     chartRef.current.timeScale().fitContent();
-  }, [stockData]);
+
+    // Track most recent pattern hit for on-chart badge
+    let recent = null;
+    for (let i = patterns.length - 1; i >= Math.max(0, patterns.length - 5); i--) {
+      if (patterns[i]) { recent = { ...patterns[i], barsAgo: (patterns.length - 1) - i }; break; }
+    }
+    setLastPattern(recent);
+  }, [stockData, patternsActive]);
 
   // ── EMA 9 / 21 update + crossover detection ────────────────────
   useEffect(() => {
@@ -1328,24 +1463,6 @@ const ChartPanel = ({
     if (ema9SeriesRef.current)  ema9SeriesRef.current.applyOptions({  visible: emaActive });
     if (ema21SeriesRef.current) ema21SeriesRef.current.applyOptions({ visible: emaActive });
   }, [emaActive]);
-
-  // ── EMA: opacity slider → update line colors ───────────────────
-  useEffect(() => {
-    if (ema9SeriesRef.current)  ema9SeriesRef.current.applyOptions({  color: hexToRgba(EMA_FAST_COLOR, emaOpacity) });
-    if (ema21SeriesRef.current) ema21SeriesRef.current.applyOptions({ color: hexToRgba(EMA_SLOW_COLOR, emaOpacity) });
-  }, [emaOpacity]);
-
-  // ── EMA control popover: close on outside click ───────────────
-  useEffect(() => {
-    const handler = (e) => {
-      if (
-        !(emaCtrlBtnRef.current && emaCtrlBtnRef.current.contains(e.target)) &&
-        !(emaCtrlRef.current    && emaCtrlRef.current.contains(e.target))
-      ) setEmaCtrlOpen(false);
-    };
-    document.addEventListener('click', handler);
-    return () => document.removeEventListener('click', handler);
-  }, []);
 
   // ── Parity Trade Signal Lines (Buy/Sell/SL/Target) ────────────
   useEffect(() => {
@@ -1650,67 +1767,32 @@ const ChartPanel = ({
             <ChartLine size={12} weight="bold" />
             <span className="hidden sm:inline">GANN</span>
           </button>
-          {/* EMA 9/21 toggle + opacity slider */}
-          <div className="flex items-stretch shrink-0 relative">
-            <button
-              onClick={() => setEmaActive(!emaActive)}
-              className={`px-2 py-1 text-[10px] font-bold uppercase tracking-wider transition-all whitespace-nowrap border ${
-                emaActive
-                  ? 'text-[#22D3EE] border-[#22D3EE]/40 bg-[#22D3EE]/8'
-                  : 'text-zinc-500 border-transparent'
-              }`}
-              data-testid="ema-toggle"
-              title="EMA 9 (fast) vs EMA 21 (slow) crossover — BUY/SELL live signal"
-            >
-              EMA 9/21
-            </button>
-            <button
-              ref={emaCtrlBtnRef}
-              onClick={() => setEmaCtrlOpen(o => !o)}
-              className={`px-1.5 py-1 text-[9px] font-bold uppercase tracking-wider transition-all whitespace-nowrap border border-l-0 flex items-center gap-0.5 ${
-                emaActive
-                  ? 'text-[#22D3EE] border-[#22D3EE]/40 bg-[#22D3EE]/8'
-                  : 'text-zinc-400 border-[#22D3EE]/30 bg-[#22D3EE]/4'
-              }`}
-              data-testid="ema-opacity-toggle"
-              title="Adjust EMA line opacity"
-            >
-              {Math.round(emaOpacity * 100)}%
-              <span className="text-[8px] leading-none">▾</span>
-            </button>
-            {emaCtrlOpen && (
-              <div
-                ref={emaCtrlRef}
-                className="absolute z-50 top-full right-0 mt-1 bg-black/95 border border-[#22D3EE]/40 rounded shadow-2xl p-3 min-w-[180px]"
-                data-testid="ema-opacity-popover"
-              >
-                <div className="text-[9px] text-zinc-400 uppercase tracking-wider mb-2 flex items-center justify-between">
-                  <span>EMA Line Opacity</span>
-                  <span className="text-[#22D3EE] font-bold">{Math.round(emaOpacity * 100)}%</span>
-                </div>
-                <input
-                  type="range"
-                  min="10"
-                  max="100"
-                  step="5"
-                  value={Math.round(emaOpacity * 100)}
-                  onChange={(e) => setEmaOpacity(Number(e.target.value) / 100)}
-                  className="w-full accent-[#22D3EE]"
-                  data-testid="ema-opacity-slider"
-                />
-                <div className="mt-2 flex items-center justify-between text-[9px]">
-                  <span className="flex items-center gap-1.5">
-                    <span className="inline-block w-3 h-0.5" style={{ background: hexToRgba(EMA_FAST_COLOR, emaOpacity) }}/>
-                    <span className="text-zinc-300">EMA 9 (fast)</span>
-                  </span>
-                  <span className="flex items-center gap-1.5">
-                    <span className="inline-block w-3 h-0.5" style={{ background: hexToRgba(EMA_SLOW_COLOR, emaOpacity) }}/>
-                    <span className="text-zinc-300">EMA 21 (slow)</span>
-                  </span>
-                </div>
-              </div>
-            )}
-          </div>
+          {/* EMA 9/21 toggle (fixed opacity 0.85) */}
+          <button
+            onClick={() => setEmaActive(!emaActive)}
+            className={`px-2 py-1 text-[10px] font-bold uppercase tracking-wider transition-all whitespace-nowrap shrink-0 border ${
+              emaActive
+                ? 'text-[#22D3EE] border-[#22D3EE]/40 bg-[#22D3EE]/8'
+                : 'text-zinc-500 border-transparent'
+            }`}
+            data-testid="ema-toggle"
+            title="EMA 9 (fast) vs EMA 21 (slow) crossover — BUY/SELL live signal"
+          >
+            EMA 9/21
+          </button>
+          {/* Candlestick Pattern color highlighting */}
+          <button
+            onClick={() => setPatternsActive(!patternsActive)}
+            className={`px-2 py-1 text-[10px] font-bold uppercase tracking-wider transition-all whitespace-nowrap shrink-0 border ${
+              patternsActive
+                ? 'text-[#FBBF24] border-[#FBBF24]/40 bg-[#FBBF24]/8'
+                : 'text-zinc-500 border-transparent'
+            }`}
+            data-testid="patterns-toggle"
+            title="Candlestick patterns — Yellow: Bullish reversal · Orange: Bearish reversal · Blue: Continuation"
+          >
+            PATTERNS
+          </button>
           {/* SMC toggle + Multi-Timeframe layers dropdown */}
           <div className="flex items-stretch shrink-0 relative">
             <button
@@ -1978,6 +2060,26 @@ const ChartPanel = ({
             {emaSignal.barsAgo > 0 && (
               <span className="text-white/50 text-[10px]">({emaSignal.barsAgo} bar{emaSignal.barsAgo > 1 ? 's' : ''} ago)</span>
             )}
+          </div>
+        )}
+
+        {/* Candlestick Pattern Badge — top right */}
+        {patternsActive && lastPattern && (
+          <div
+            className="absolute top-2 right-2 z-20 flex items-center gap-2 px-3 py-1.5 rounded-lg text-xs font-bold shadow-lg border backdrop-blur-sm"
+            style={{
+              background: `${PATTERN_COLORS[lastPattern.category]}22`,
+              borderColor: `${PATTERN_COLORS[lastPattern.category]}80`,
+              color: PATTERN_COLORS[lastPattern.category],
+            }}
+            data-testid="pattern-badge"
+          >
+            <span className="inline-block w-2 h-2 rounded-full" style={{ background: PATTERN_COLORS[lastPattern.category] }} />
+            <span>{lastPattern.name}</span>
+            <span className="text-white/50 text-[10px]">
+              ({lastPattern.category === 'bullish-reversal' ? 'BUY' :
+                lastPattern.category === 'bearish-reversal' ? 'SELL' : 'CONT'}{lastPattern.barsAgo > 0 ? ` · ${lastPattern.barsAgo} ago` : ''})
+            </span>
           </div>
         )}
 
