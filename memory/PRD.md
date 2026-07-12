@@ -177,7 +177,32 @@ Clone trading app → Add dark/light mode, mobile responsiveness, MiroFish LangG
 
 ---
 
-## Update (June 2026) — Robot 3.0 Layer Evolution Engine
+## Update (July 2026) — Options + VP Button + Bug Fixes
+
+### VP Button (Volume Profile Manual Toggle)
+- Added "VP" toggle button in ChartPanel.jsx toolbar (after PATTERNS, before SMC)
+- Orange color (`#FF6B00`) — matches POC line color
+- Click ON → fetches Volume Profile (POC/VAH/VAL canvas + price lines)
+- Click OFF → clears VP, hides canvas
+- No longer auto-activates on stock selection (manual control like PATTERNS/EMA)
+
+### NIFTY 50 Options Fix (502 → 200)
+- NSE option chain API was blocked → returned empty data → HTTP 502
+- Added Black-Scholes derived fallback (`_fetch_nse_index_derived_options`) for NIFTY/BANKNIFTY/FINNIFTY/MIDCPNIFTY/NIFTYNXT50
+- Uses live yfinance spot price + India VIX + Black-Scholes Greeks (delta, theta, IV)
+- 8-second async timeout via `asyncio.wait_for` + `asyncio.to_thread` prevents event loop blocking
+- Shows `is_live_derived=True` badge in response
+- Weekly Thursday expiry schedule for NSE indices
+
+### OrderFlow Division By Zero Bug Fix
+- Clicking any NIFTY/SENSEX option row caused "float division by zero" toast
+- Root cause: `_of_volume_profile` — when all bars have price=0, `price_max = 0 * 1.01 = 0` → `bin_size = 0`
+- Fix 1: `_of_volume_profile` — guard: `price_max = price_min + 1.0 if price_min == 0 else price_min * 1.01` + `bin_size <= 0` fallback
+- Fix 2: `_of_calc_atr` — returns `max(avg, 0.01)` (never zero)
+- Fix 3: `_of_footprint_candle` — rng guard: `max(l * 0.001, 0.01)`
+- All 12 pytest tests pass (test file: /app/backend/tests/test_orderflow_zero.py)
+
+
 **Feature**: DreamerV3 LIVE TRAINING ab sirf khud evolve nahi hota — uske reward signals Robot 3.0 ke SABHI 6 layers ko train karte hain (zero blind-spots goal).
 
 **New file**: `/app/backend/agents/layer_evolution.py` — `LayerEvolutionEngine` singleton
