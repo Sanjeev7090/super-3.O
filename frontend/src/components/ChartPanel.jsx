@@ -552,6 +552,7 @@ const ChartPanel = ({
   const tfBtnRef = useRef(null);
   const [tfDropdownPos, setTfDropdownPos] = useState({ top: 0, left: 0 });
   const [showTrade, setShowTrade] = useState(false);
+  const [vpEnabled, setVpEnabled] = useState(false);
   const [vpActive, setVpActive] = useState(false);
   const [vpTooltip, setVpTooltip] = useState(null);
   const { theme } = useTheme();
@@ -1486,19 +1487,18 @@ const ChartPanel = ({
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [tradeSignal, stockData]);
 
-  // ── Volume Profile: fetch when stock/data changes ──────────────
+  // ── Volume Profile: fetch only when user enables VP (or stock changes while VP is on) ──
   useEffect(() => {
     clearVPLines();
     vpDataRef.current = null;
     setVpActive(false);
     setVpTooltip(null);
-    if (!stockData?.bars?.length) return;
+    if (!vpEnabled || !stockData?.bars?.length) return;
     const ticker = selectedStock?.ticker || selectedStock?.symbol || 'STOCK';
-    // Small delay so chart settles first
     const t = setTimeout(() => fetchVolumeProfile(stockData.bars, ticker), 400);
     return () => clearTimeout(t);
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [stockData, selectedStock]);
+  }, [stockData, selectedStock, vpEnabled]);
 
   // ── Volume Profile: animation loop ────────────────────────────
   useEffect(() => {
@@ -1792,6 +1792,19 @@ const ChartPanel = ({
             title="Candlestick patterns — Yellow: Bullish reversal · Orange: Bearish reversal · Blue: Continuation"
           >
             PATTERNS
+          </button>
+          {/* Volume Profile toggle — POC, VAH, VAL auto-mark */}
+          <button
+            onClick={() => setVpEnabled(v => !v)}
+            className={`px-2 py-1 text-[10px] font-bold uppercase tracking-wider transition-all whitespace-nowrap shrink-0 border ${
+              vpEnabled
+                ? 'text-[#FF6B00] border-[#FF6B00]/40 bg-[#FF6B00]/8'
+                : 'text-zinc-500 border-transparent'
+            }`}
+            data-testid="vp-toggle"
+            title="Volume Profile — POC (orange), VAH (purple), VAL (cyan) auto-mark"
+          >
+            VP
           </button>
           {/* SMC toggle + Multi-Timeframe layers dropdown */}
           <div className="flex items-stretch shrink-0 relative">
