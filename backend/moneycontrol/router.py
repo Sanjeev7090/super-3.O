@@ -920,3 +920,220 @@ async def get_advance_decline():
             "timestamp": datetime.now(timezone.utc).isoformat(),
         }
 
+
+
+# ─── 360° Market View — Multi-Index Advance/Decline ────────────────────
+# Full Nifty family A/D across configurable timeframes.
+# Because 500-ticker daily fetches are heavy, we aggressively cache per-timeframe.
+
+NIFTY_BANK_TICKERS = [
+    "HDFCBANK", "ICICIBANK", "SBIN", "AXISBANK", "KOTAKBANK",
+    "INDUSINDBK", "PNB", "BANKBARODA", "AUBANK", "IDFCFIRSTB",
+    "FEDERALBNK", "BANDHANBNK",
+]
+
+NIFTY_NEXT_50_TICKERS = [
+    "DMART", "PIDILITIND", "GODREJCP", "SIEMENS", "AMBUJACEM",
+    "COLPAL", "MARICO", "DABUR", "HAVELLS", "BOSCHLTD",
+    "BERGEPAINT", "MOTHERSON", "ICICIPRULI", "ICICIGI", "CHOLAFIN",
+    "PIIND", "TVSMOTOR", "VBL", "GAIL", "IOC",
+    "BPCL", "TATAPOWER", "ADANIPOWER", "ADANIGREEN", "JIOFIN",
+    "LICI", "INDIGO", "IRCTC", "IRFC", "PFC",
+    "RECLTD", "MUTHOOTFIN", "HDFCAMC", "SBICARD", "NAUKRI",
+    "ZOMATO", "NYKAA", "PGHH", "UBL", "CGPOWER",
+    "TATACHEM", "TORNTPHARM", "LUPIN", "TATAELXSI", "PERSISTENT",
+    "COFORGE", "MPHASIS", "LTIM", "INDIANB", "CANBK",
+]
+
+NIFTY_MIDCAP_100_TICKERS = [
+    "ASHOKLEY", "MRF", "BALKRISIND", "SUPREMEIND", "PAGEIND",
+    "CROMPTON", "VOLTAS", "ABFRL", "APLAPOLLO", "ASTRAL",
+    "BATAINDIA", "BSOFT", "CAMS", "CANFINHOME", "CONCOR",
+    "COROMANDEL", "CUB", "CUMMINSIND", "DEEPAKNTR", "DIXON",
+    "ESCORTS", "EXIDEIND", "GLENMARK", "GMRAIRPORT", "GODREJPROP",
+    "HINDPETRO", "INDHOTEL", "IPCALAB", "JINDALSTEL", "JUBLFOOD",
+    "KEI", "LAURUSLABS", "LICHSGFIN", "LTTS", "M&MFIN",
+    "MAXHEALTH", "MFSL", "NAM-INDIA", "NAVINFLUOR", "OBEROIRLTY",
+    "OFSS", "PATANJALI", "PETRONET", "POLYCAB", "SRF",
+    "SUNTV", "SYNGENE", "TATACOMM", "TRIDENT", "UPL",
+    "IDBI", "L&TFH", "NMDC", "MANAPPURAM", "IRB",
+    "GRANULES", "BALRAMCHIN", "BIOCON", "CENTURYTEX", "IBULHSGFIN",
+]
+
+NIFTY_SMALLCAP_100_TICKERS = [
+    "AAVAS", "ALKEM", "APLLTD", "BANKINDIA", "BSE",
+    "CDSL", "CENTRALBK", "CHAMBLFERT", "EQUITASBNK", "GRSE",
+    "HINDCOPPER", "HUDCO", "IEX", "INDIAMART", "IRCON",
+    "JBCHEPHARM", "JYOTHYLAB", "KAJARIACER", "KIMS", "LEMONTREE",
+    "MAHABANK", "MAZDOCK", "NBCC", "NHPC", "PVRINOX",
+    "RAILTEL", "RVNL", "SJVN", "SOBHA", "SONACOMS",
+    "SPARC", "STAR", "SUNDARMFIN", "SUZLON", "SWSOLAR",
+    "TATVA", "TITAGARH", "TRITURBINE", "UJJIVAN", "VGUARD",
+    "WELCORP", "WHIRLPOOL", "YESBANK", "ZENSARTECH", "ZFCVINDIA",
+]
+
+
+def _dedupe(seq):
+    seen = set(); out = []
+    for x in seq:
+        if x not in seen:
+            seen.add(x); out.append(x)
+    return out
+
+
+_NIFTY_50_ONLY = [s for s, _ in NIFTY_50_TICKERS]
+NIFTY_100_TICKERS = _dedupe(_NIFTY_50_ONLY + NIFTY_NEXT_50_TICKERS)
+NIFTY_200_TICKERS = _dedupe(NIFTY_100_TICKERS + NIFTY_MIDCAP_100_TICKERS)
+NIFTY_500_TICKERS = _dedupe(NIFTY_200_TICKERS + NIFTY_SMALLCAP_100_TICKERS)
+
+
+INDEX_CONSTITUENTS = {
+    "NIFTY 50":            _NIFTY_50_ONLY,
+    "NIFTY BANK":          NIFTY_BANK_TICKERS,
+    "NIFTY MIDCAP 100":    NIFTY_MIDCAP_100_TICKERS,
+    "NIFTY NEXT 50":       NIFTY_NEXT_50_TICKERS,
+    "NIFTY 100":           NIFTY_100_TICKERS,
+    "NIFTY 200":           NIFTY_200_TICKERS,
+    "NIFTY 500":           NIFTY_500_TICKERS,
+    "NIFTY SMALLCAP 100":  NIFTY_SMALLCAP_100_TICKERS,
+}
+
+# Timeframe → (yfinance period string, approximate trading-day lookback)
+TIMEFRAME_MAP = {
+    "1D":   ("5d",   1),
+    "5D":   ("15d",  5),
+    "1M":   ("2mo",  21),
+    "3M":   ("4mo",  63),
+    "6M":   ("7mo",  126),
+    "1Y":   ("14mo", 252),
+    "5Y":   ("6y",   252 * 5),
+    "YTD":  ("14mo", None),  # special: compute from Jan 1 of current year
+}
+
+_market360_cache = {}     # {timeframe: {"ts": t, "data": obj}}
+_MARKET360_TTL_SEC = 300  # 5 minutes
+
+
+def _fetch_market_360_sync(timeframe: str):
+    """Fetch multi-index A/D for the requested timeframe."""
+    import yfinance as yf
+    if timeframe not in TIMEFRAME_MAP:
+        raise ValueError(f"Invalid timeframe: {timeframe}")
+
+    yf_period, lookback = TIMEFRAME_MAP[timeframe]
+
+    # Union of all needed symbols
+    all_syms = _dedupe([s for lst in INDEX_CONSTITUENTS.values() for s in lst])
+    yf_syms = [f"{s}.NS" for s in all_syms]
+
+    df = yf.download(
+        yf_syms, period=yf_period, interval="1d",
+        progress=False, group_by="ticker", auto_adjust=False, threads=True,
+    )
+
+    # Per-stock direction relative to lookback (or YTD start)
+    stock_direction = {}
+    stock_change = {}
+    year_start = datetime(datetime.now(timezone.utc).year, 1, 1)
+
+    for sym in all_syms:
+        yfs = f"{sym}.NS"
+        try:
+            sub = df[yfs].dropna(subset=["Close"])
+        except Exception:
+            continue
+        if len(sub) < 2:
+            continue
+        last_close = float(sub["Close"].iloc[-1])
+
+        if timeframe == "YTD":
+            # Find first close of current calendar year
+            ts_idx = pd.to_datetime(sub.index)
+            mask = ts_idx >= year_start
+            if mask.any():
+                first_of_year = float(sub["Close"][mask].iloc[0])
+            else:
+                first_of_year = float(sub["Close"].iloc[0])
+            prev_close = first_of_year
+        else:
+            # Use lookback (or first available if not enough history)
+            if len(sub) > lookback:
+                prev_close = float(sub["Close"].iloc[-1 - lookback])
+            else:
+                prev_close = float(sub["Close"].iloc[0])
+
+        change = last_close - prev_close
+        stock_change[sym] = {
+            "last":   round(last_close, 2),
+            "prev":   round(prev_close, 2),
+            "change": round(change, 2),
+            "pct":    round((change / prev_close * 100.0) if prev_close else 0.0, 2),
+        }
+        if   change >  0: stock_direction[sym] = "up"
+        elif change <  0: stock_direction[sym] = "down"
+        else:             stock_direction[sym] = "flat"
+
+    # Aggregate per index
+    index_results = []
+    for name, tickers in INDEX_CONSTITUENTS.items():
+        adv = dec = unc = 0
+        for t in tickers:
+            d = stock_direction.get(t)
+            if   d == "up":   adv += 1
+            elif d == "down": dec += 1
+            elif d == "flat": unc += 1
+        total = adv + dec + unc
+        dominant = "bullish" if adv > dec else ("bearish" if dec > adv else "neutral")
+        index_results.append({
+            "name":       name,
+            "advances":   adv,
+            "declines":   dec,
+            "unchanged":  unc,
+            "total":      total,
+            "coverage":   len(tickers),  # constituents in our list (may be <full)
+            "dominant":   dominant,
+        })
+
+    return {
+        "timeframe":  timeframe,
+        "indices":    index_results,
+        "stock_data": stock_change,      # optional: per-symbol change data
+        "timestamp":  datetime.now(timezone.utc).isoformat(),
+        "source":     "yfinance",
+    }
+
+
+@router.get("/market-360")
+async def get_market_360(timeframe: str = "1D"):
+    """
+    360° market view: A/D across NIFTY 50 / BANK / NEXT 50 / MIDCAP 100 /
+    NIFTY 100 / 200 / 500 / SMALLCAP 100 for a chosen timeframe.
+
+    Timeframes: 1D, 5D, 1M, 3M, 6M, 1Y, 5Y, YTD.
+    Cached 5 min per timeframe.
+    """
+    tf = timeframe.upper().strip()
+    if tf not in TIMEFRAME_MAP:
+        return {"error": f"Invalid timeframe '{timeframe}'. Valid: {list(TIMEFRAME_MAP.keys())}"}
+
+    now = time.time()
+    hit = _market360_cache.get(tf)
+    if hit and (now - hit["ts"] < _MARKET360_TTL_SEC):
+        return hit["data"]
+
+    try:
+        loop = asyncio.get_event_loop()
+        result = await loop.run_in_executor(None, _fetch_market_360_sync, tf)
+        _market360_cache[tf] = {"ts": now, "data": result}
+        return result
+    except Exception as e:
+        logger.exception("market-360 fetch failed")
+        if hit:
+            return hit["data"]  # stale cache
+        return {
+            "error":     str(e),
+            "timeframe": tf,
+            "indices":   [],
+            "timestamp": datetime.now(timezone.utc).isoformat(),
+            "source":    "error",
+        }

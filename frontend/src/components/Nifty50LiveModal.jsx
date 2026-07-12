@@ -1,17 +1,20 @@
 import React, { useEffect, useState, useMemo } from 'react';
 import { X } from '@phosphor-icons/react';
 import { BullIcon, BearIcon } from './BullBearIcons';
+import Market360View from './Market360View';
 
 /**
  * Nifty50LiveModal
- * Displays all NIFTY 50 constituent stocks with live LTP / change / change%.
- * Sortable columns, filter box, auto-refresh via parent's onRefresh.
+ * Two views:
+ *   1) "360° View"  → multi-index A/D across NIFTY family + timeframe selector
+ *   2) "NIFTY 50 Live" → sortable per-stock table (existing)
  */
 export default function Nifty50LiveModal({ data, onClose, onRefresh }) {
   const [query, setQuery] = useState('');
   const [sortKey, setSortKey] = useState('change_pct');
   const [sortDir, setSortDir] = useState('desc');
   const [tab, setTab] = useState('all'); // all | advances | declines
+  const [view, setView] = useState('360'); // '360' | 'live'
   const [refreshing, setRefreshing] = useState(false);
 
   useEffect(() => {
@@ -117,6 +120,38 @@ export default function Nifty50LiveModal({ data, onClose, onRefresh }) {
           </div>
         </div>
 
+        {/* View switcher: 360° View | NIFTY 50 Live */}
+        <div className="flex items-center gap-1 px-4 py-2 border-b border-slate-200 dark:border-white/10 bg-white dark:bg-[#0A0A0A]">
+          <button
+            onClick={() => setView('360')}
+            className={`px-4 py-1.5 text-[11px] font-bold uppercase tracking-wider rounded transition-colors ${
+              view === '360'
+                ? 'bg-emerald-500/15 text-emerald-500 border border-emerald-500/40'
+                : 'text-zinc-500 hover:text-slate-800 dark:hover:text-white hover:bg-slate-100 dark:hover:bg-white/5 border border-transparent'
+            }`}
+            data-testid="modal-view-360"
+          >
+            360° Market View
+          </button>
+          <button
+            onClick={() => setView('live')}
+            className={`px-4 py-1.5 text-[11px] font-bold uppercase tracking-wider rounded transition-colors ${
+              view === 'live'
+                ? 'bg-emerald-500/15 text-emerald-500 border border-emerald-500/40'
+                : 'text-zinc-500 hover:text-slate-800 dark:hover:text-white hover:bg-slate-100 dark:hover:bg-white/5 border border-transparent'
+            }`}
+            data-testid="modal-view-live"
+          >
+            NIFTY 50 Live
+          </button>
+        </div>
+
+        {/* ── 360° View ── */}
+        {view === '360' && <Market360View />}
+
+        {/* ── NIFTY 50 Live view (filter + table) ── */}
+        {view === 'live' && (
+        <>
         {/* Filter row */}
         <div className="flex flex-wrap items-center gap-2 px-4 py-2 border-b border-slate-200 dark:border-white/10 bg-white dark:bg-[#0A0A0A]">
           <div className="flex items-center gap-1 border border-slate-200 dark:border-white/10 rounded overflow-hidden">
@@ -211,11 +246,13 @@ export default function Nifty50LiveModal({ data, onClose, onRefresh }) {
           </table>
         </div>
 
-        {/* Footer */}
+        {/* Footer (live view) */}
         <div className="px-4 py-2 border-t border-slate-200 dark:border-white/10 bg-slate-50 dark:bg-black/60 text-[9px] font-mono text-zinc-500 flex items-center justify-between">
           <span>Source: {data?.source || 'yfinance'} · cached 60s</span>
           <span>Updated {data?.timestamp ? new Date(data.timestamp).toLocaleTimeString() : ''}</span>
         </div>
+        </>
+        )}
       </div>
     </div>
   );
