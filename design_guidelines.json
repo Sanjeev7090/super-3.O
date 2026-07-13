@@ -1,103 +1,145 @@
 {
-  "theme": "dark",
-  "archetype": "2 (Performance Pro / Elite Command Center)",
-  "rationale": "For a highly technical Gann trading dashboard with explosive/Godzilla scanners, the UI must feel like an elite, tactical command center. High contrast (Deep Obsidian + Pure White) ensures data readability, while Electric Green/Blaze Red provide immediate signal recognition.",
+  "project_name": "Gann Trader / KRONOS Dashboard",
+  "theme": "Dark Mode First (Tactical Minimalism)",
+  "typography": {
+    "headings": {
+      "family": "Chivo, sans-serif",
+      "weights": ["300", "700", "900"],
+      "usage": "Used for massive tickers, panel titles, and numerical data that needs to pop."
+    },
+    "body": {
+      "family": "IBM Plex Sans, sans-serif",
+      "weights": ["400", "500", "600"],
+      "usage": "Dense UI data, tables, dropdowns, regular text."
+    },
+    "monospace": {
+      "family": "JetBrains Mono, monospace",
+      "usage": "Data grids, order flow, code, precise numerical alignment."
+    },
+    "rules": [
+      "NO INTER FOR HEADINGS.",
+      "Tickers (NIFTY/SENSEX) MUST use tight letter spacing: tracking-tighter.",
+      "Overlines and table headers MUST be uppercase, tiny text-xs, tracking-[0.1em].",
+      "Never center align dense data arrays; always use left or tabular alignment."
+    ]
+  },
   "colors": {
     "background": {
-      "app": "#0A0A0A",
+      "base": "#0A0A0A",
       "panel": "#141414",
-      "panel_hover": "#1C1C1C",
-      "input": "#000000"
+      "sub_panel": "#1E1E1E"
     },
     "text": {
       "primary": "#FFFFFF",
       "secondary": "#A1A1AA",
-      "muted": "#52525B",
-      "inverse": "#000000"
+      "tertiary": "#71717A"
     },
-    "border": {
-      "default": "rgba(255,255,255,0.1)",
-      "focus": "#FFFFFF",
-      "highlight": "rgba(255,255,255,0.2)"
+    "accents": {
+      "gain": "#34C759",
+      "loss": "#FF3B30",
+      "brand": "#007AFF",
+      "warning": "#F5A623"
     },
-    "signals": {
-      "buy": "#00E676",
-      "sell": "#FF3B30",
-      "wait": "#F5A623",
-      "ghost_mode": "#A855F7",
-      "godzilla": "#FF0055",
-      "demon": "#007AFF"
+    "borders": {
+      "default": "rgba(255, 255, 255, 0.1)",
+      "focus": "rgba(0, 122, 255, 0.5)"
     },
-    "chart": {
-      "bull_candle": "#00E676",
-      "bear_candle": "#FF3B30",
-      "gann_fan_1x1": "#3B82F6",
-      "gann_fan_secondary": "rgba(255,255,255,0.3)"
+    "rules": [
+      "NEVER use pure #000000 or generic SaaS blue gradients.",
+      "Gains and Losses must strictly use Signal Green and Electric Blaze with high contrast.",
+      "Backgrounds must be tinted gray/obsidian, avoiding muddy grays."
+    ]
+  },
+  "visual_enhancers": {
+    "surfaces": "Grid Borders (The Technical Look) - Expose the skeleton with 1px border-white/10 on panels. Flat background, no mushy shadows.",
+    "hover_states": "Crisp 1px border highlights, slight background lightening. Active nav items get a 2px left border (Volt Blue).",
+    "glassmorphism": "Avoid in main data areas (causes refraction and readability issues). Use solid #141414 for high-density data.",
+    "textures": "Subtle noise overlay on the main background to kill digital flatness."
+  },
+  "layouts": {
+    "global_shell": "100vh h-screen w-full flex flex-col overflow-hidden bg-[#0A0A0A] text-white",
+    "top_bar": {
+      "structure": "h-16 border-b border-white/10 flex items-center justify-between px-4 shrink-0 bg-[#0A0A0A] z-50",
+      "left": "Brand Logo (KRONOS/Gann Trader) - strong typography.",
+      "center": "Prominent Stock Tickers (Nifty, BankNifty, Sensex) with large font (text-xl to text-2xl font-black Chivo) and colored % change.",
+      "right": "Global Stock/Crypto Search Bar (highly visible), Theme Toggle, Voice Command Icon, Notifications Icon."
+    },
+    "main_workspace": {
+      "structure": "flex-1 flex overflow-hidden",
+      "left_sidebar": {
+        "structure": "w-20 md:w-64 border-r border-white/10 flex flex-col bg-[#0A0A0A] transition-all z-40",
+        "items": ["SCAN", "STRAT", "TRADERS", "PAPER", "SETTINGS"],
+        "active_state": "Bright Volt Blue icon + text, solid background tint (bg-white/5), 2px solid Volt Blue left border.",
+        "settings_drawer": "Triggered by the SETTINGS nav item. Renders as a Shadcn Sheet or custom sliding drawer. MUST contain: Watchlist, Crypto List, Groww Portfolio, Portfolio Tracker, Alert System, Sector Picker, Moneycontrol Movers, Regulatory Watchdog, RL Agent Training, Ensemble Cockpit, PECE Tracker, Quant Sub-tabs. 'Dreamer V3 Robo-Trader' must be pinned at the top of this drawer with high visual prominence."
+      },
+      "center_panel": {
+        "structure": "flex-1 flex flex-col min-w-0 overflow-y-auto bg-[#0A0A0A]",
+        "top": "MultiChartLayout (1/2/4 grid) - takes up ~70% of vertical space. Needs tight gaps (gap-1).",
+        "bottom": "Grid for Order Flow Panel and Kronos AI Forecast - remaining ~30% of space, split horizontally."
+      },
+      "right_panel": {
+        "structure": "w-80 border-l border-white/10 flex flex-col bg-[#141414] shrink-0 z-30",
+        "tabs": {
+          "header": "Flex row, 3 equal tabs: Signals | Positions | Risk. Active tab gets Volt Blue bottom border.",
+          "content_1_signals": "Live AI signal dashboard cards. Dense, compact, text-xs/text-sm.",
+          "content_2_positions": "Open positions table (Robo + Paper). Must show Live P&L prominently in Signal Green / Electric Blaze.",
+          "content_3_risk": "Drawdown, Circuit-breaker, Risk metrics (Advanced Risk Panel)."
+        }
+      }
+    },
+    "mobile_responsive": {
+      "sidebar": "Collapses to a bottom tab bar or hidden behind a hamburger menu to maximize chart real estate.",
+      "right_panel": "Hidden by default. Triggered via a Top Bar icon or swipe gesture to slide in from the right as a drawer.",
+      "center_panel": "MultiChartLayout stacks vertically or defaults to 1-chart view. Order Flow and AI Forecast stack below chart."
     }
   },
-  "typography": {
-    "families": {
-      "heading": "'Chivo', sans-serif",
-      "body": "'IBM Plex Sans', sans-serif",
-      "mono": "'JetBrains Mono', monospace"
-    },
-    "scales": {
-      "h1": "text-4xl md:text-5xl font-black tracking-tighter uppercase",
-      "h2": "text-2xl md:text-3xl font-bold tracking-tight",
-      "h3": "text-lg md:text-xl font-bold uppercase tracking-wider",
-      "body": "text-sm md:text-base leading-relaxed",
-      "data_large": "text-2xl font-mono tracking-tight",
-      "data_medium": "text-base font-mono",
-      "data_small": "text-xs font-mono tracking-wider",
-      "badge": "text-[10px] font-bold uppercase tracking-[0.2em]"
+  "component_mapping": {
+    "StockSearch": "Moved to Top Bar Right, highly accessible.",
+    "AutoScanner": "Rendered when left nav 'SCAN' is active.",
+    "AI Strategy Analyzers": "Bundle of 14+ rendered in center or right when left nav 'STRAT' is active. Stacked dense cards.",
+    "Top Trader Universe Scan": "Rendered when 'TRADERS' is active.",
+    "Paper Trading Panel": "Rendered when 'PAPER' is active.",
+    "Settings Sub-modules": "All grouped in Settings drawer. Use accordion or nested tabs inside the drawer.",
+    "Modals": "Option Chain Modal, Top Options Sheet, Visualize Modal, 3D Gann Panel, etc., remain absolute/fixed position overlays with glassmorphism backdrop (backdrop-blur-md bg-black/60) and 1px border-white/10."
+  },
+  "icons_and_assets": {
+    "library": "lucide-react",
+    "style": "Crisp, thin (1.5px stroke), minimal.",
+    "image_urls": {
+      "background_textures": [
+        {
+          "url": "https://images.unsplash.com/photo-1638184984605-af1f05249a56?crop=entropy&cs=srgb&fm=jpg&ixid=M3w4NjAzMjV8MHwxfHNlYXJjaHwyfHxhYnN0cmFjdCUyMGRhcmslMjB0ZWNoJTIwdGV4dHVyZSUyMGJhY2tncm91bmR8ZW58MHx8fHwxNzgzOTUwMjY4fDA&ixlib=rb-4.1.0&q=85",
+          "description": "Dark tech abstract texture",
+          "category": "Settings Drawer Header / Robo-Trader Banner Background"
+        }
+      ],
+      "avatars": [
+        {
+          "url": "https://images.unsplash.com/photo-1560250097-0b93528c311a?crop=entropy&cs=srgb&fm=jpg&ixid=M3w4NjA1NTZ8MHwxfHNlYXJjaHwxfHxwcm9mZXNzaW9uYWwlMjB0cmFkZXIlMjBwb3J0cmFpdHxlbnwwfHx8fDE3ODM5NTAyNjd8MA&ixlib=rb-4.1.0&q=85",
+          "description": "Professional user avatar",
+          "category": "Top Bar User Profile (if needed) or Settings panel"
+        }
+      ]
     }
   },
-  "layout": {
-    "strategy": "The 'Control Room' Grid",
-    "structure": {
-      "container": "min-h-screen bg-[#0A0A0A] text-white overflow-hidden flex flex-col",
-      "header": "h-16 border-b border-white/10 flex items-center justify-between px-6 bg-[#0A0A0A]/90 backdrop-blur-md z-50",
-      "main_grid": "flex-1 grid grid-cols-1 lg:grid-cols-12 gap-px bg-white/10",
-      "left_sidebar": "lg:col-span-3 bg-[#0A0A0A] flex flex-col",
-      "center_chart": "lg:col-span-6 bg-[#0A0A0A] flex flex-col relative",
-      "right_sidebar": "lg:col-span-3 bg-[#0A0A0A] flex flex-col"
-    },
-    "spacing": {
-      "panel_padding": "p-4 md:p-6",
-      "dense_row": "py-2 px-3",
-      "gap": "gap-4"
-    }
+  "instructions_to_main_agent": {
+    "1": "Use ONLY .js files for React components, no .tsx. Assume React and Tailwind are already set up.",
+    "2": "Create a strictly nested and responsive Flex/Grid layout representing the dashboard shell in TradingDashboard.js.",
+    "3": "Use Shadcn components (like Tabs, Accordion, Sheet) for the Settings drawer and Right Panel.",
+    "4": "The Right Panel MUST be implemented using a Tab-based interface. The user explicitly chose this over a fixed list.",
+    "5": "DO NOT delete any existing feature component imports/placements. If it's not one of the 5 main nav items, put it in the SETTINGS drawer.",
+    "6": "Ensure the Top Bar tickers are exceptionally bold and prominent (text-2xl or larger).",
+    "7": "Do not use transparent backgrounds under dropdowns or modals. Ensure z-index layers are managed carefully (e.g., top bar z-50, sidebar z-40)."
   },
-  "surface_strategies": {
-    "panels": "Use 'Grid Borders' look. Panels shouldn't float like cards; they should fill the grid with 1px solid borders separating them. No border-radius for outer panels to maintain the terminal look. Inner widgets can have max rounded-sm (2px).",
-    "buttons": "Flat, sharp edges (rounded-none). High contrast hover states. Primary buttons: bg-white text-black hover:bg-gray-200. Signal buttons: bg-signal text-black.",
-    "inputs": "bg-black border-white/20 focus:border-white focus:ring-0 rounded-none font-mono text-sm"
-  },
-  "feature_guidelines": {
-    "search": "Command Palette style, fixed at top of center column or header. Use Cmd+K shortcut. Large mono font for ticker symbols.",
-    "candlestick_gann_chart": "Occupies center_chart. Dark background, no gridlines or very faint 5% opacity. Gann Fan lines must originate from user-selected pivot (or lowest low) radiating upwards. Use distinct color for 1x1 (45-degree) angle.",
-    "square_of_9": "A dynamic CSS Grid. Center cell (1) highlighted. Cardinal cross (horizontal/vertical) and Ordinal cross (diagonals) must have distinct background tints (e.g., bg-white/5). Cell numbers in mono font.",
-    "signal_scanners": {
-      "falling_knife": "Use red/orange highlights. High volume/sharp drop indicators.",
-      "godzilla": "Use aggressive pink/red (#FF0055) glowing text/badges for extreme volume breakouts.",
-      "demon_confluence": "Show as a progress/radar or stacked horizontal bar chart with 0-100 score.",
-      "ghost_mode": "Auto-scanner toggle. When ON, pulse a neon purple (#A855F7) indicator in the header."
-    },
-    "signal_badges": "Solid background, black text. Extremely crisp. e.g. `<span class='bg-[#00E676] text-black px-2 py-1 text-[10px] font-bold uppercase tracking-widest'>BUY</span>`"
-  },
-  "animations": {
-    "data_tick": "When price or signal updates, flash background color (green/red) briefly and fade to transparent over 500ms.",
-    "scanner_sweep": "For Ghost Mode, a slow translating linear gradient line moving top-to-bottom across the scanner list to indicate 'scanning'.",
-    "hover": "Instant background color change, no slow CSS transitions. Makes UI feel faster."
-  },
-  "instructions_to_main_agent": [
-    "INSTALL FONTS: Ensure you import 'Chivo', 'IBM Plex Sans', and 'JetBrains Mono' via Google Fonts.",
-    "INSTALL ICONS: Use Phosphor Icons (`@phosphor-icons/react`) for sharp, technical iconography suitable for trading terminals.",
-    "USE RECHARTS/CUSTOM SVG: For the candlestick chart, you may need to build a custom SVG-based Gann Fan overlay on top of Recharts or a lightweight canvas library.",
-    "SQUARE OF 9 ALGORITHM: Implement the mathematical spiral algorithm in JS to populate a responsive CSS grid.",
-    "STRICT GRID BORDERS: Do not use floating cards with shadows. Use `border-r border-b border-white/10` to divide sections, creating a flush 'Bloomberg Terminal' aesthetic.",
-    "NO INTER FONT: Do not use Inter. Strictly use Chivo for headers, IBM Plex for body, and JetBrains Mono for all numbers/tickers.",
-    "TEST IDS: Add `data-testid` to all interactive elements (search, timeframe selectors, scanner rows, badges)."
-  ],
-  "image_urls": []
+  "UNIVERSAL_GUIDELINES_FOR_MAIN_AGENT": [
+    "You tend to converge toward generic outputs. Avoid this: make creative, distinctive frontends.",
+    "Dark colors look good when used independently without gradients. DO NOT use dark colors as gradients.",
+    "Don't make generic centered layouts. Use F-pattern and structural alignment.",
+    "Create depth through layered design elements with z-index hierarchy.",
+    "NEVER use AI assistant Emoji characters for icons.",
+    "Every interaction needs micro-animations (hover states, transitions).",
+    "Subtle grain textures, custom cursors, and crisp 1px borders separate good from extraordinary.",
+    "All interactive and key informational elements MUST include a data-testid attribute.",
+    "Use modern button styles relevant to the tactical app style (sharp edges or minimal 4px radius)."
+  ]
 }
