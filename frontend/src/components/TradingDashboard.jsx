@@ -766,8 +766,8 @@ const TradingDashboard = () => {
       {/* Indices Live Ticker — NIFTY 50 / SENSEX / BANK NIFTY (tap → top options) */}
       <IndicesTickerBar onIndexClick={handleIndexClick} />
 
-      {/* Mobile Tab Bar — full-width 3-panel nav (improved) */}
-      <div className="flex lg:hidden border-b border-slate-200 dark:border-white/10 shrink-0 bg-white dark:bg-[#0D0D0D] transition-colors duration-200">
+      {/* Mobile Tab Bar — full-width 3-panel nav · hidden on md+ (iPad/laptop show full grid) */}
+      <div className="flex md:hidden border-b border-slate-200 dark:border-white/10 shrink-0 bg-white dark:bg-[#0D0D0D] transition-colors duration-200">
         {mobilePanels.map(p => (
           <button key={p.id} onClick={() => setMobilePanel(p.id)}
             className={`flex-1 py-2.5 flex flex-col items-center justify-center gap-0.5 transition-all duration-200 relative ${
@@ -785,8 +785,8 @@ const TradingDashboard = () => {
         ))}
       </div>
 
-      {/* Main Grid — flex-1 to fill remaining space */}
-      <div className="flex-1 flex flex-col lg:grid lg:grid-cols-12 overflow-hidden min-h-0">
+      {/* Main Grid — flex-1 to fill remaining space · md: = 768px (iPad+) shows 3-col grid */}
+      <div className="flex-1 flex flex-col md:grid md:grid-cols-12 overflow-hidden min-h-0">
 
         {/* Left Sidebar */}
         <aside className={`lg:col-span-3 xl:col-span-2 border-r border-slate-200 dark:border-white/10 bg-white dark:bg-[#0A0A0A] flex flex-col overflow-y-auto transition-colors duration-200 ${mobilePanel !== 'left' ? 'hidden lg:flex' : 'flex'}`} data-testid="left-sidebar">

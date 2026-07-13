@@ -5,6 +5,25 @@ import ChartPanel from './ChartPanel';
 const API = `${process.env.REACT_APP_BACKEND_URL}/api`;
 const DEFAULT_TF = { multiplier: 1, timespan: 'day', label: '1D' };
 
+// ── localStorage helpers (only for slots 2, 3, 4 — slot 1 is always fresh) ──
+const SLOT_KEY   = (id) => `dreamer_chart_slot_${id}`;
+const LAYOUT_KEY = 'dreamer_chart_layout';
+
+function loadSlotPrefs(id) {
+  if (id === 1) return null;
+  try {
+    const raw = localStorage.getItem(SLOT_KEY(id));
+    return raw ? JSON.parse(raw) : null;
+  } catch (e) { return null; }
+}
+
+function saveSlotPrefs(id, { selectedStock, timeframe, dataSource }) {
+  if (id === 1) return; // Never persist slot 1
+  try {
+    localStorage.setItem(SLOT_KEY(id), JSON.stringify({ selectedStock, timeframe, dataSource }));
+  } catch (e) { /* storage unavailable */ }
+}
+
 // Layout icon helpers
 const Icon1 = () => (
   <svg width="16" height="16" viewBox="0 0 16 16" fill="currentColor">
@@ -177,6 +196,15 @@ function ChartSlot({ slot, onUpdate, isCompact }) {
   const handleSemiLog = useCallback((v) => onUpdate(slot.id, { semiLogScale: v }), [slot.id, onUpdate]);
   const handlePivot   = useCallback((p) => onUpdate(slot.id, { pivotPoint: p }),  [slot.id, onUpdate]);
 
+    // Auto-fetch on mount for slots 2-4 restored from localStorage
+    // (stock metadata is saved but chart data is never stored — need a fresh fetch)
+    useEffect(() => {
+      if (slot.id !== 1 && slot.selectedStock && !slot.stockData && !slot.loading) {
+        fetchData(slot.selectedStock.ticker, slot.timeframe);
+      }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, [slot.id]);
+
   return (
     <div className="flex flex-col h-full bg-[#090909] border border-zinc-800/60 rounded-lg overflow-hidden">
       {/* Slot header */}
@@ -258,13 +286,28 @@ export default function MultiChartLayout({
   initialDataSource,
   onPrimaryStockChange,   // callback when slot-1 stock changes (updates left sidebar)
 }) {
-  const [layout, setLayout] = useState(1);
-  const [slots, setSlots] = useState(() => [
-    makeSlot(1),
-    makeSlot(2),
-    makeSlot(3),
-    makeSlot(4),
-  ]);
+  // Persist layout preference
+  const [layout, setLayout] = useState(() => {
+    try { return parseInt(localStorage.getItem(LAYOUT_KEY) || '1', 10) || 1; } catch { return 1; }
+  });
+
+  const handleLayoutChange = useCallback((n) => {
+    setLayout(n);
+    try { localStorage.setItem(LAYOUT_KEY, String(n)); } catch (e) { /* ignore */ }
+  }, []);
+
+  // Slots: slot 1 always fresh, slots 2-4 restored from localStorage
+  const [slots, setSlots] = useState(() => {
+    const prefs2 = loadSlotPrefs(2);
+    const prefs3 = loadSlotPrefs(3);
+    const prefs4 = loadSlotPrefs(4);
+    return [
+      makeSlot(1),
+      makeSlot(2, prefs2 ? { selectedStock: prefs2.selectedStock, timeframe: prefs2.timeframe || DEFAULT_TF, dataSource: prefs2.dataSource || 'groww' } : {}),
+      makeSlot(3, prefs3 ? { selectedStock: prefs3.selectedStock, timeframe: prefs3.timeframe || DEFAULT_TF, dataSource: prefs3.dataSource || 'groww' } : {}),
+      makeSlot(4, prefs4 ? { selectedStock: prefs4.selectedStock, timeframe: prefs4.timeframe || DEFAULT_TF, dataSource: prefs4.dataSource || 'groww' } : {}),
+    ];
+  });
 
   // Sync slot-1 when left sidebar stock changes
   useEffect(() => {
@@ -292,7 +335,18 @@ export default function MultiChartLayout({
       const next = [...prev];
       const idx = next.findIndex(s => s.id === id);
       if (idx < 0) return prev;
-      next[idx] = { ...next[idx], ...patch };
+      const updated = { ...next[idx], ...patch };
+      next[idx] = updated;
+
+      // Persist slot 2/3/4 stock+tf+ds whenever they change
+      if (id !== 1 && (patch.selectedStock !== undefined || patch.timeframe !== undefined || patch.dataSource !== undefined)) {
+        saveSlotPrefs(id, {
+          selectedStock: updated.selectedStock,
+          timeframe:     updated.timeframe,
+          dataSource:    updated.dataSource,
+        });
+      }
+
       // If slot 1's stock changes, notify parent (left sidebar sync)
       if (id === 1 && patch.selectedStock && onPrimaryStockChange) {
         onPrimaryStockChange(patch.selectedStock);
@@ -331,7 +385,7 @@ export default function MultiChartLayout({
         ].map(({ n, Icon, label }) => (
           <button
             key={n}
-            onClick={() => setLayout(n)}
+            onClick={() => handleLayoutChange(n)}
             title={label}
             className={`flex items-center gap-1 px-2 py-1 rounded text-[10px] font-semibold transition-colors border ${
               layout === n
