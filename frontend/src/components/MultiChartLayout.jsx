@@ -147,7 +147,7 @@ function StockSearchBar({ slot, onSelect }) {
 }
 
 // --- Single chart slot ---
-function ChartSlot({ slot, onUpdate, isCompact }) {
+function ChartSlot({ slot, onUpdate, isCompact, onOpenOptionChain }) {
   const fetchData = useCallback(async (ticker, tf, dsOverride) => {
     const ds = dsOverride !== undefined ? dsOverride : slot.dataSource;
     onUpdate(slot.id, { loading: true });
@@ -242,7 +242,7 @@ function ChartSlot({ slot, onUpdate, isCompact }) {
             activeStrategy={slot.activeStrategy}
             strategyData={slot.strategyData}
             tradeSignal={null}
-            onOpenOptionChain={() => {}}
+            onOpenOptionChain={onOpenOptionChain}
           />
         ) : (
           <div className="h-full flex flex-col items-center justify-center text-zinc-700 gap-2 select-none">
@@ -285,6 +285,7 @@ export default function MultiChartLayout({
   initialTimeframe,
   initialDataSource,
   onPrimaryStockChange,   // callback when slot-1 stock changes (updates left sidebar)
+  onOpenOptionChain,      // callback to open OptionChainModal from any slot
 }) {
   // Persist layout preference
   const [layout, setLayout] = useState(() => {
@@ -420,6 +421,7 @@ export default function MultiChartLayout({
             slot={slot}
             onUpdate={updateSlot}
             isCompact={layout > 1}
+            onOpenOptionChain={onOpenOptionChain}
           />
         ))}
       </div>

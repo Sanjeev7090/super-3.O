@@ -1,0 +1,40 @@
+{
+  "summary": "Tested OC (Option Chain) button bug fix in MultiChartLayout. Verified prop propagation: TradingDashboard → MultiChartLayout → ChartSlot → ChartPanel. All 5 required scenarios tested and passed.",
+  "backend_issues": {
+    "critical": [],
+    "minor": []
+  },
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [],
+    "design_issues": []
+  },
+  "test_report_links": [],
+  "action_items": [],
+  "critical_code_review_comments": [
+    "MINOR: In MultiChartLayout, ChartSlot hardcodes isCrypto={false}, meaning OC button will appear even if user searches for BTC/crypto stocks in the chart slot. The OC visibility check for crypto depends on isCrypto prop, not selectedStock.type. This is a design choice (MultiChartLayout is equity-focused) but could confuse users who load crypto in chart slots and see OC button.",
+    "INFO: The 'Select stock…' placeholder uses Unicode ellipsis (…) not ASCII (...). This can cause issues in testing and URL encoding — cosmetic but worth noting."
+  ],
+  "updated_files": [],
+  "success_rate": {
+    "backend": "N/A (frontend-only test)",
+    "frontend": "100% (6/6 tests passed)"
+  },
+  "seed_data_creation": "None",
+  "retest_needed": false,
+  "should_main_agent_self_test": false,
+  "context_for_next_testing_agent": "OC button bug fix fully verified. MultiChartLayout now correctly passes onOpenOptionChain prop through the chain. Single chart (1), dual chart (2), and both chart slots tested. The OC button (data-testid=option-chain-btn) appears after equity stock is loaded and clicking it opens OptionChainModal (data-testid=option-chain-modal) with CALL|STRIKE|PUT columns.",
+  "feature_test_results": {
+    "app_loads_no_js_errors": "PASS",
+    "oc_button_absent_before_stock_selected": "PASS",
+    "oc_button_visible_for_equity_reliance": "PASS",
+    "oc_button_click_opens_modal": "PASS - Modal shows RELIANCE INDUSTRIES with CALL/STRIKE/PUT columns",
+    "modal_has_strike_prices_and_call_put": "PASS - Data loaded from NSE Live API",
+    "modal_can_be_closed": "PASS",
+    "oc_absent_for_option_type": "PASS (code confirmed: selectedStock.type !== 'OPTION' condition in ChartPanel line 1953)",
+    "multi_chart_2_layout_slot1_oc": "PASS - OC button visible and modal opens for RELIANCE",
+    "multi_chart_2_layout_slot2_oc": "PASS - OC button visible and INFY modal opens from slot 2",
+    "prop_propagation_fix_verified": "PASS - MultiChartLayout line 288 accepts onOpenOptionChain, passes to ChartSlot at line 424, ChartSlot passes to ChartPanel at line 245"
+  },
+  "rca_of_bug": "The OC button was not working because MultiChartLayout was not accepting the onOpenOptionChain prop. ChartSlot was hardcoding () => {} as the stub for onOpenOptionChain when calling ChartPanel. Fix: (1) MultiChartLayout now accepts onOpenOptionChain in its props destructuring, (2) passes it to each ChartSlot, (3) ChartSlot passes it to ChartPanel instead of empty stub. TradingDashboard already had the correct handler: onOpenOptionChain={(payload) => setShowOptionChain(payload)}."
+}

@@ -1349,11 +1349,13 @@ const ChartPanel = ({
       chart.timeScale().fitContent();
 
       handleResize = () => {
-        if (chartContainerRef.current && chart) {
-          chart.applyOptions({
-            width: chartContainerRef.current.clientWidth,
-            height: chartContainerRef.current.clientHeight,
-          });
+        if (chartContainerRef.current && chartRef.current) {
+          try {
+            chartRef.current.applyOptions({
+              width: chartContainerRef.current.clientWidth,
+              height: chartContainerRef.current.clientHeight,
+            });
+          } catch (e) { /* chart may have been disposed */ }
         }
       };
       window.addEventListener('resize', handleResize);
@@ -1372,6 +1374,11 @@ const ChartPanel = ({
       if (roInst) roInst.disconnect();
       clearGannLines();
       if (chartInst) chartInst.remove();
+      // Null out refs so animation loops & other effects don't call into a disposed chart
+      chartRef.current = null;
+      candlestickSeriesRef.current = null;
+      ema9SeriesRef.current = null;
+      ema21SeriesRef.current = null;
     };
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);

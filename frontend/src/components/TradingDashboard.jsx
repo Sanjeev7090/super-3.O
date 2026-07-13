@@ -866,6 +866,7 @@ const TradingDashboard = () => {
                   handleStockSelect(stock);
                 }
               }}
+              onOpenOptionChain={(payload) => setShowOptionChain(payload)}
             />
           </div>
           {/* Footprint Panel — below chart, auto-fetches when stock loaded */}
