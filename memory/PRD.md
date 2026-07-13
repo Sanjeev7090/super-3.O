@@ -46,7 +46,17 @@ Clone trading app → Add dark/light mode, mobile responsiveness, MiroFish LangG
 - Auto-Discover Momentum Scanner (NSE F&O universe, 50 stocks)
 - Vertical Right Sidebar Tabs (SCAN/STRAT/PAPER/RL/ROBO/AI ASM/PICK/PE-CE/QNT)
 
-### Phase 8 — SMC Canvas Upgrades + DeltaDash + F&O Parity (Jun 2026)
+### Phase 12 — New Intelligence Features + Free Crypto Stack (Jul 2026)
+- **Adaptive Time Window**: trading_loop.py — confidence multipliers by IST time (9:15-10:00 = 1.5x, closing = 1.2x, lunch = 0.8x)
+- **News RSS Replacement**: yfinance news replaced with Google News + ET RSS feeds (free, no API key); `news_filter.py`
+- **NSE Event Calendar**: F&O expiry, budget, RBI meeting auto-detection; event_score_multiplier applied to trading confidence
+- **Position Sizing Intelligence**: Kelly Criterion + ATR volatility adaptive sizing; `position_sizer.py` + `/api/position-sizer/calculate`
+- **PropSafe Mode**: Drawdown protection — daily loss limit (2%) + max DD (5%) kill switch; `prop_safe.py` + `/api/propsafe/status|configure|reset`
+- **Crypto Free Stack**: CoinGecko → **CoinPaprika** (prices/detail/search/market-overview) + **Kraken REST OHLC** (charts); no API key, 100x better rate limits
+- New components: `PropSafePanel.jsx`, `PositionSizerPanel.jsx` (shown in ROBO tab)
+- New endpoints: `/api/time-window`, `/api/events/upcoming`
+
+
 - F&O Put-Call Parity Scanner: `/api/options/parity-scanner`, "Open in Chart" button
 - DeltaDash Analysis Scoreboard: `/api/deltadash/scoreboard` (44+ tickers × 6 TFs)
 - ChartPanel.jsx massively upgraded: Supply/Demand Zones, Wyckoff Accumulation/Distribution,

@@ -19,7 +19,7 @@ const CryptoList = ({ onCryptoSelect, selectedCrypto }) => {
   const [searchQ, setSearchQ] = useState('');
   const prevPricesRef = useRef({});
 
-  // ---- Initial data from CoinGecko (metadata + baseline prices) ----
+  // ---- Initial data from CoinPaprika (metadata + baseline prices) ----
   const fetchCoins = useCallback(async () => {
     try {
       const { data } = await axios.get(`${API}/crypto/prices`);
@@ -81,7 +81,7 @@ const CryptoList = ({ onCryptoSelect, selectedCrypto }) => {
     };
   }, []);
 
-  // ---- Merge CoinGecko metadata with Kraken live prices ----
+  // ---- Merge CoinPaprika metadata with Kraken live prices ----
   const mergedCoins = coins.map(coin => {
     const live = liveOverlay[coin.id];
     if (!live) return coin;

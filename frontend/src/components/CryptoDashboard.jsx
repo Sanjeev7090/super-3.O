@@ -453,6 +453,9 @@ const CryptoDashboard = ({ preSelectedCoin }) => {
         <button onClick={() => { fetchPrices(); fetchOverview(); }} className="shrink-0 p-1.5 hover:bg-white/5 rounded" data-testid="crypto-refresh-btn">
           <ArrowClockwise size={14} className="text-zinc-400" />
         </button>
+        <span className="shrink-0 text-[8px] text-zinc-600 hidden sm:flex items-center gap-0.5 border border-zinc-800 rounded px-1.5 py-0.5">
+          <Globe size={8} className="text-zinc-700" /> CoinPaprika + Kraken
+        </span>
       </div>
 
       {/* Content */}
