@@ -319,3 +319,15 @@ Clone trading app → Add dark/light mode, mobile responsiveness, MiroFish LangG
 
 **Minor code-review notes (not blocking)**: `TradingDashboard.jsx` now ~1013 lines (approaching 700-line split guideline — consider extracting modal-mounting block into `DashboardModals.jsx`); `StockSearch` result text lacks a separator between badge/symbol/name (cosmetic only).
 
+---
+
+## Bug Fix (Feb 2026) — Timeframe Change Shows Same Candles
+
+**Root Cause**: `MultiChartLayout.jsx`'s `fetchData` function was calling the Groww candles API with wrong params (`timespan`/`multiplier` instead of `interval`/`days_back`). Backend Groww endpoint always received defaults (`interval="1d"`, `days_back=120`) → same daily candles on every TF change.
+
+**Fix**: Added `GROWW_INTV_MAP` and `GROWW_DAYS_MAP` lookup tables in `MultiChartLayout.jsx` that correctly translate TF label (e.g. `'15M'`) → `interval='15m'`, `days_back=15` (matching the logic in `TradingDashboard.jsx`'s `fetchStockData`).
+
+**File changed**: `/app/frontend/src/components/MultiChartLayout.jsx` (lines 150-163, fetchData function lines 165-196)
+
+**Testing**: 7/7 TF scenarios passed (1D, 15M, 1H, 5M, 1W, 30M, 4H) including multi-slot independent TF changes.
+
