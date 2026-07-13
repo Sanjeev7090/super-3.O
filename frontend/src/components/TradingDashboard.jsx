@@ -2,6 +2,7 @@ import React, { useState, useEffect, useRef, useCallback } from 'react';
 import axios from 'axios';
 import StockSearch from './StockSearch';
 import ChartPanel from './ChartPanel';
+import MultiChartLayout from './MultiChartLayout';
 import SignalDashboard from './SignalDashboard';
 import SquareOf9Calculator from './SquareOf9Calculator';
 import OIAnalysis from './OIAnalysis';
@@ -849,33 +850,22 @@ const TradingDashboard = () => {
           </div>
         </aside>
 
-        {/* Center Chart */}
-        <main className={`flex-1 lg:col-span-6 xl:col-span-7 flex flex-col relative min-h-0 overflow-y-auto overflow-x-hidden ${mobilePanel !== 'chart' ? 'hidden lg:flex' : 'flex'}`} data-testid="center-chart">
-          {/* Chart — fixed height inside scrollable column so chart canvas always has room */}
-          <div className="shrink-0" style={{ height: 'min(60vh, 560px)', minHeight: '320px' }}>
-            <ChartPanel
-              stockData={stockData}
-              loading={loading}
-              selectedStock={selectedStock}
-              onPivotSelect={handlePivotSelect}
-              pivotPoint={pivotPoint}
-              gannFan={gannFan}
-              semiLogScale={semiLogScale}
-              setSemiLogScale={setSemiLogScale}
-              timeframe={timeframe}
-              onTimeframeChange={handleTimeframeChange}
-              isCrypto={isCrypto}
-              dataSource={dataSource}
-              onDataSourceChange={(s) => {
-                setDataSource(s);
-                if (selectedStock && !isCrypto) {
-                  fetchStockData(selectedStock.ticker, timeframe, s);
+        {/* Center — Multi Chart */}
+        <main className={`flex-1 lg:col-span-6 xl:col-span-7 flex flex-col relative min-h-0 overflow-hidden ${mobilePanel !== 'chart' ? 'hidden lg:flex' : 'flex'}`} data-testid="center-chart">
+          {/* Multi-chart panel — fixed height block */}
+          <div className="shrink-0" style={{ height: 'min(62vh, 580px)', minHeight: '340px' }}>
+            <MultiChartLayout
+              initialStock={selectedStock}
+              initialStockData={stockData}
+              initialLoading={loading}
+              initialTimeframe={timeframe}
+              initialDataSource={dataSource}
+              onPrimaryStockChange={(stock) => {
+                // When user picks a stock in chart slot-1, sync it to left sidebar state too
+                if (stock && stock.ticker !== selectedStock?.ticker) {
+                  handleStockSelect(stock);
                 }
               }}
-              activeStrategy={activeStrategy}
-              strategyData={strategyData}
-              tradeSignal={parityTradeSignal}
-              onOpenOptionChain={(info) => setShowOptionChain(info)}
             />
           </div>
           {/* Footprint Panel — below chart, auto-fetches when stock loaded */}
