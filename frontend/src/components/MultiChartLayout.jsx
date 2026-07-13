@@ -1,4 +1,4 @@
-import React, { useState, useCallback, useRef, useEffect } from 'react';
+import React, { useState, useCallback, useRef, useEffect, useMemo } from 'react';
 import axios from 'axios';
 import ChartPanel from './ChartPanel';
 
@@ -189,7 +189,7 @@ function ChartSlot({ slot, onUpdate, isCompact, onOpenOptionChain }) {
         });
         data = res.data;
       }
-      onUpdate(slot.id, { stockData: data, loading: false, timeframe: tf });
+      onUpdate(slot.id, { stockData: data, loading: false, timeframe: tf, lastFetched: Date.now() });
     } catch (err) {
       onUpdate(slot.id, { loading: false });
     }
@@ -222,18 +222,59 @@ function ChartSlot({ slot, onUpdate, isCompact, onOpenOptionChain }) {
     // eslint-disable-next-line react-hooks/exhaustive-deps
     }, [slot.id]);
 
+  // Auto-refresh every 5 min for intraday timeframes
+  const INTRADAY_TFS = new Set(['1MIN','2M','3M','5M','10M','15M','30M','45M','1H','2H','4H']);
+  const isIntraday = INTRADAY_TFS.has(slot.timeframe?.label);
+  useEffect(() => {
+    if (!isIntraday || !slot.selectedStock) return;
+    const id = setInterval(() => {
+      fetchData(slot.selectedStock.ticker, slot.timeframe);
+    }, 5 * 60 * 1000); // 5 minutes
+    return () => clearInterval(id);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [isIntraday, slot.selectedStock?.ticker, slot.timeframe?.label]);
+
+  // Tick every 30s to keep "Xm ago" text fresh
+  const [, setTick] = useState(0);
+  useEffect(() => {
+    const id = setInterval(() => setTick(t => t + 1), 30000);
+    return () => clearInterval(id);
+  }, []);
+
+  const ageLabel = useMemo(() => {
+    if (!slot.lastFetched) return null;
+    const diffSec = Math.floor((Date.now() - slot.lastFetched) / 1000);
+    if (diffSec < 60) return 'just now';
+    const diffMin = Math.floor(diffSec / 60);
+    return `${diffMin}m ago`;
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [slot.lastFetched, Math.floor((Date.now() - (slot.lastFetched || 0)) / 30000)]);
+
   return (
     <div className="flex flex-col h-full bg-[#090909] border border-zinc-800/60 rounded-lg overflow-hidden">
       {/* Slot header */}
       <div className="shrink-0 flex items-center gap-2 px-2 py-1.5 bg-zinc-950 border-b border-zinc-800/60">
         <StockSearchBar slot={slot} onSelect={handleStockSelect} />
         {slot.selectedStock && (
-          <div className="shrink-0 flex items-center gap-1">
-            <span className="text-[10px] text-zinc-500">
-              {slot.timeframe?.label || '1D'}
-            </span>
-            {slot.loading && (
-              <span className="text-[9px] text-violet-400 animate-pulse">●</span>
+          <div className="shrink-0 flex items-center gap-1.5">
+            <span className="text-[10px] text-zinc-500">{slot.timeframe?.label || '1D'}</span>
+            {ageLabel && !slot.loading && (
+              <span className="text-[9px] text-zinc-600" title="Last data refresh">{ageLabel}</span>
+            )}
+            {slot.loading ? (
+              <span className="text-[9px] text-violet-400 animate-pulse" title="Loading…">●</span>
+            ) : (
+              <button
+                onClick={() => slot.selectedStock && fetchData(slot.selectedStock.ticker, slot.timeframe)}
+                title="Refresh chart data"
+                data-testid={`refresh-slot-${slot.id}`}
+                className="text-zinc-600 hover:text-emerald-400 transition-colors"
+              >
+                <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+                  <polyline points="23 4 23 10 17 10"/>
+                  <path d="M20.49 15a9 9 0 1 1-2.12-9.36L23 10"/>
+                </svg>
+              </button>
             )}
           </div>
         )}
@@ -288,6 +329,7 @@ function makeSlot(id, overrides = {}) {
     gannFan: null,
     activeStrategy: null,
     strategyData: null,
+    lastFetched: null,
     ...overrides,
   };
 }
