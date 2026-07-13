@@ -1,0 +1,39 @@
+{
+  "summary": "Frontend-only testing of TF (timeframe) bug fix in MultiChartLayout.jsx. Verified that changing TF dropdown in chart slots triggers correct Groww API params (interval/days_back) instead of the old wrong params (timespan/multiplier). All 7 TF scenarios tested and PASSED. Bug fix confirmed working.",
+  "backend_issues": {
+    "critical": [],
+    "minor": []
+  },
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [],
+    "design_issues": []
+  },
+  "test_report_links": [],
+  "action_items": [],
+  "critical_code_review_comments": [
+    "MultiChartLayout.jsx GROWW_INTV_MAP correctly maps all TF labels to Groww interval strings (e.g., '15M'->'15m', '1H'->'1h', '1W'->'1w')",
+    "GROWW_DAYS_MAP correctly sets days_back per TF (15M->15, 1H->60, 5M->10, 1W->400, 30M->25, 4H->150)",
+    "On Groww API failure, fallback to yfinance stock/bars is correctly chained (catch block at line 181)",
+    "Note: GROWW_INTV_MAP in MultiChartLayout has more entries (2M, 3M, 45M, 2H, 1MO) than TradingDashboard's intvMap — this is fine, MultiChartLayout is more complete"
+  ],
+  "updated_files": [],
+  "success_rate": {
+    "backend": "N/A (frontend-only scope)",
+    "frontend": "100% (7/7 TF tests passed)"
+  },
+  "seed_data_creation": "None",
+  "retest_needed": false,
+  "should_main_agent_self_test": false,
+  "context_for_next_testing_agent": "Bug fix for TF params in MultiChartLayout.jsx is verified working. The GROWW_INTV_MAP and GROWW_DAYS_MAP lookup tables correctly translate TF labels to Groww API params. All tested timeframes (1D, 15M, 1H, 5M, 1W, 30M, 4H) send correct interval and days_back to /api/groww/candles/{symbol}. 2-chart and 4-chart layouts also work independently. The main search uses data-testid='stock-search-input' and results use data-testid='search-result-{idx}'. TF trigger is data-testid='tf-trigger', individual TF buttons are data-testid='tf-{label}' (e.g., 'tf-15M').",
+  "test_results_detail": {
+    "1D_initial_load": "interval=1d&days_back=120 - CORRECT",
+    "15M_change": "interval=15m&days_back=15 - CORRECT",
+    "1H_change": "interval=1h&days_back=60 - CORRECT",
+    "5M_change": "interval=5m&days_back=10 - CORRECT",
+    "1W_change": "interval=1w&days_back=400 - CORRECT",
+    "30M_change": "interval=30m&days_back=25 - CORRECT",
+    "4H_in_4chart_layout": "interval=4h&days_back=150 - CORRECT",
+    "2chart_slot1_independent": "interval=15m&days_back=15 - CORRECT (independent from slot 2)"
+  }
+}

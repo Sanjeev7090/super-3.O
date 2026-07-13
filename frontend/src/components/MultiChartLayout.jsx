@@ -147,6 +147,21 @@ function StockSearchBar({ slot, onSelect }) {
 }
 
 // --- Single chart slot ---
+// Maps TF label → Groww interval string and days_back (same as TradingDashboard.jsx)
+const GROWW_INTV_MAP = {
+  '1MIN':'1m','2M':'2m','3M':'3m','5M':'5m','10M':'10m','15M':'15m',
+  '30M':'30m','45M':'45m','1H':'1h','2H':'2h','4H':'4h',
+  '1D':'1d','1W':'1w','1MO':'1mo',
+  // legacy labels
+  '1M':'1d','6M':'1d','1Y':'1w',
+};
+const GROWW_DAYS_MAP = {
+  '1MIN':7,'2M':7,'3M':7,'5M':10,'10M':15,'15M':15,'30M':25,'45M':25,
+  '1H':60,'2H':90,'4H':150,
+  '1D':120,'1W':400,'1MO':730,
+  '1M':30,'6M':180,'1Y':365,
+};
+
 function ChartSlot({ slot, onUpdate, isCompact, onOpenOptionChain }) {
   const fetchData = useCallback(async (ticker, tf, dsOverride) => {
     const ds = dsOverride !== undefined ? dsOverride : slot.dataSource;
@@ -155,20 +170,22 @@ function ChartSlot({ slot, onUpdate, isCompact, onOpenOptionChain }) {
       let data;
       if (ds === 'groww') {
         const sym = ticker.replace('.NS','').replace('.BO','').replace(/^\^/,'');
+        const interval  = GROWW_INTV_MAP[tf.label] || '1d';
+        const days_back = GROWW_DAYS_MAP[tf.label] || 120;
         try {
           const res = await axios.get(`${API}/groww/candles/${sym}`, {
-            params: { timespan: tf.timespan, multiplier: tf.multiplier, ...(tf.days ? { days: tf.days } : {}) }
+            params: { interval, days_back }
           });
           data = { ticker, bars: res.data.bars || [] };
         } catch {
           const res = await axios.get(`${API}/stock/bars/${ticker}`, {
-            params: { timespan: tf.timespan, multiplier: tf.multiplier, ...(tf.days ? { days: tf.days } : {}) }
+            params: { timespan: tf.timespan, multiplier: tf.multiplier, limit: 200 }
           });
           data = res.data;
         }
       } else {
         const res = await axios.get(`${API}/stock/bars/${ticker}`, {
-          params: { timespan: tf.timespan, multiplier: tf.multiplier, ...(tf.days ? { days: tf.days } : {}) }
+          params: { timespan: tf.timespan, multiplier: tf.multiplier, ...(tf.days ? { days: tf.days } : {}), limit: 200 }
         });
         data = res.data;
       }
