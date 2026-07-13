@@ -2,9 +2,7 @@ import React, { useState, useEffect, useRef, useCallback } from 'react';
 import axios from 'axios';
 import StockSearch from './StockSearch';
 import MultiChartLayout from './MultiChartLayout';
-import SignalDashboard from './SignalDashboard';
 import SquareOf9Calculator from './SquareOf9Calculator';
-import OIAnalysis from './OIAnalysis';
 import AITradeAnalysis from './AITradeAnalysis';
 import FallingKnifeAnalysis from './FallingKnifeAnalysis';
 import ReversePriceSwings from './ReversePriceSwings';
@@ -27,7 +25,6 @@ import NarrativeSwingAnalysis from './NarrativeSwingAnalysis';
 import HybridVWAPAnalysis from './HybridVWAPAnalysis';
 import VisualizeModal from './VisualizeModal';
 import Gann3DPanel from './Gann3DPanel';
-import AdvancedRiskPanel from './AdvancedRiskPanel';
 import VoiceCommandSystem from './VoiceCommandSystem';
 import OrderFlowPanel from './OrderFlowPanel';
 import KronosForecastPanel from './KronosForecastPanel';
@@ -41,11 +38,10 @@ import PaperTradingPanel from './PaperTradingPanel';
 import SectorStocksSheet from './SectorStocksSheet';
 import TopTraderUniverseScan from './TopTraderUniverseScan';
 import SettingsDrawer from './SettingsDrawer';
-import OpenPositionsPanel from './OpenPositionsPanel';
 import { Toaster, toast } from 'sonner';
 import {
   Bell, ChartLineUp, List, Newspaper, Sun, Moon, X,
-  MagnifyingGlass, UsersThree, Notebook, GearSix, Pulse, ShieldWarning, Wallet,
+  MagnifyingGlass, UsersThree, Notebook, GearSix,
 } from '@phosphor-icons/react';
 import { useTheme } from '../context/ThemeContext';
 
@@ -74,7 +70,6 @@ const TradingDashboard = () => {
   const [semiLogScale, setSemiLogScale] = useState(false);
   const [timeframe, setTimeframe] = useState({ multiplier: 1, timespan: 'day', label: '1D' });
   const [activeTab, setActiveTab] = useState('scan'); // scan | strategies | traders | paper (left nav)
-  const [rightPanelTab, setRightPanelTab] = useState('signals'); // signals | positions | risk
   const [showSettings, setShowSettings] = useState(false);
   const [settingsSection, setSettingsSection] = useState('robo');
   const [mobilePanel, setMobilePanel] = useState('chart'); // left | chart | right
@@ -543,13 +538,6 @@ const TradingDashboard = () => {
     { id: 'paper',      label: 'PAPER',   icon: Notebook        },
   ];
 
-  // Right Panel tabs — Signals / Positions / Risk (tab-based, per user's explicit choice)
-  const rightPanelTabs = [
-    { id: 'signals',   label: 'SIGNALS',   icon: Pulse         },
-    { id: 'positions', label: 'POSITIONS', icon: Wallet        },
-    { id: 'risk',      label: 'RISK',      icon: ShieldWarning },
-  ];
-
   const mobilePanels = [
     { id: 'left',  label: 'Menu',  icon: List        },
     { id: 'chart', label: 'Chart', icon: ChartLineUp },
@@ -774,7 +762,7 @@ const TradingDashboard = () => {
         </aside>
 
         {/* Center — Live Chart + Key Indicators */}
-        <main className={`flex-1 lg:col-span-6 xl:col-span-7 flex flex-col relative min-h-0 overflow-y-auto ${mobilePanel !== 'chart' ? 'hidden lg:flex' : 'flex'}`} data-testid="center-chart">
+        <main className={`flex-1 lg:col-span-9 xl:col-span-10 flex flex-col relative min-h-0 overflow-y-auto ${mobilePanel !== 'chart' ? 'hidden lg:flex' : 'flex'}`} data-testid="center-chart">
           {/* Multi-chart panel — fixed height block */}
           <div className="shrink-0" style={{ height: 'min(56vh, 540px)', minHeight: '320px' }}>
             <MultiChartLayout
@@ -811,46 +799,6 @@ const TradingDashboard = () => {
           </div>
         </main>
 
-        {/* Right Panel — Tab-based: Signals / Positions / Risk */}
-        <aside className={`lg:col-span-3 border-l border-slate-200 dark:border-white/10 bg-white dark:bg-[#141414] flex flex-col overflow-hidden transition-colors duration-200 ${mobilePanel !== 'right' ? 'hidden lg:flex' : 'flex'}`} data-testid="right-panel">
-          <div className="flex shrink-0 border-b border-slate-200 dark:border-white/10">
-            {rightPanelTabs.map(tab => (
-              <button key={tab.id} onClick={() => setRightPanelTab(tab.id)}
-                className={`flex-1 flex items-center justify-center gap-1 py-2.5 text-[10px] font-bold uppercase tracking-wider border-b-2 transition-all ${
-                  rightPanelTab === tab.id
-                    ? 'border-[#007AFF] text-[#007AFF] bg-[#007AFF]/5'
-                    : 'border-transparent text-slate-400 dark:text-zinc-500 hover:text-slate-700 dark:hover:text-zinc-200'
-                }`}
-                data-testid={`right-panel-tab-${tab.id}`}>
-                <tab.icon size={13} weight={rightPanelTab === tab.id ? 'fill' : 'regular'} />
-                <span className="hidden sm:inline">{tab.label}</span>
-              </button>
-            ))}
-          </div>
-
-          <div className="flex-1 overflow-y-auto">
-            {rightPanelTab === 'signals' && (
-              <div className="divide-y divide-slate-200 dark:divide-white/10">
-                {signal ? (
-                  <SignalDashboard signal={signal} />
-                ) : (
-                  <div className="p-6 text-center">
-                    <p className="text-slate-400 dark:text-zinc-500 text-xs">
-                      Select a pivot point on the chart to generate a live AI signal.
-                    </p>
-                  </div>
-                )}
-                {selectedStock && selectedStock.type === 'INDEX' && (
-                  <OIAnalysis symbol={selectedStock.ticker.replace('.NS', '')} />
-                )}
-              </div>
-            )}
-
-            {rightPanelTab === 'positions' && <OpenPositionsPanel />}
-
-            {rightPanelTab === 'risk' && <AdvancedRiskPanel />}
-          </div>
-        </aside>
       </div>
 
       {/* Settings Drawer — always mounted so Robo/RL background loops never stop */}
