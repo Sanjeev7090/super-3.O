@@ -1,0 +1,29 @@
+{
+  "summary": "Focused frontend retest (reduced scope per prior timeout) of new Trading Dashboard shell: left sidebar nav, Settings drawer, right panel tabs, top bar search->chart load, and mobile responsive 3-tab layout. All items in the requested scope PASSED with no console errors.",
+  "backend_issues": {
+    "critical": [],
+    "minor": []
+  },
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [],
+    "design_issues": []
+  },
+  "test_report_links": [],
+  "action_items": [],
+  "critical_code_review_comments": [
+    "SettingsDrawer overlay uses opacity/pointer-events toggling (never unmounted) instead of display:none — this is intentional (keeps Robo/RL polling alive) but Playwright's is_visible() returns true even when closed since opacity!=0 isn't checked; verified via computed style that opacity:0 + pointer-events:none is correctly applied on close, so this is NOT a real bug, just a note for future test-writers to use CSS checks instead of is_visible() for this drawer.",
+    "TradingDashboard.jsx is now ~1013 lines - approaching the 700-line split guideline; consider extracting the large modal/sheet mounting block (Visualize/3D/Parity/DeltaDash/HybridBrain/OptionChain/SectorSheet) into a separate '<DashboardModals />' component to reduce file size.",
+    "StockSearch result item text concatenates badge+symbol+name with no separator in DOM text content (e.g. 'NSERELIANCEReliance Industries') - purely cosmetic for accessibility/screen-readers, visually fine due to flex layout."
+  ],
+  "updated_files": [],
+  "success_rate": {
+    "backend": "N/A (frontend-only scope per request)",
+    "frontend": "100% (all in-scope items passed)"
+  },
+  "seed_data_creation": "None",
+  "retest_needed": false,
+  "should_main_agent_self_test": false,
+  "context_for_next_testing_agent": "This reduced-scope retest covered: (1) sidebar-nav-scan/strategies/traders/paper clicks - all render content, no errors; (2) sidebar-nav-settings opens settings-drawer, pinned Robo banner visible, settings-section-watchlist and settings-section-quant pills render content, settings-drawer-close correctly sets opacity:0/pointer-events:none (verify via computed style, not is_visible(), since drawer stays mounted); (3) right-panel-tab-signals/positions/risk all render (open-positions-panel confirmed visible, showed empty state '0 Open Positions' correctly since no trades exist); (4) topbar search: fill stock-search-input with 'RELIANCE' -> search-results dropdown appears -> click search-result-0 -> chart loads in center-chart with toast 'Loaded 1D (yfinance) for RELIANCE' and full candlestick chart with EMA/GANN/SMC overlays rendered; (5) mobile (390x844): default view shows only center-chart (left-sidebar & right-panel hidden), mobile-panel-left/chart/right buttons correctly toggle visibility of left-sidebar/center-chart/right-panel respectively with correct active-tab highlighting. Deep multi-chart 'Object is disposed' regression was skipped per instructions (lower priority, previously fixed). No backend endpoint testing was performed (out of scope) - OpenPositionsPanel rendered without errors implying /api/robo/positions and /api/paper-trade/positions did not throw fatal issues but exact response payloads were not asserted.",
+  "rca_of_issue": "N/A - no bugs found in this pass."
+}

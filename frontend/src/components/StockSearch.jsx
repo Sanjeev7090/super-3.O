@@ -41,7 +41,7 @@ const StockSearch = ({ onStockSelect, selectedStock }) => {
   };
 
   return (
-    <div data-testid="stock-search">
+    <div className="relative" data-testid="stock-search">
       <div className="relative">
         <MagnifyingGlass className="absolute left-2.5 top-1/2 -translate-y-1/2 text-zinc-500" size={14} weight="bold" />
         <input
@@ -54,10 +54,10 @@ const StockSearch = ({ onStockSelect, selectedStock }) => {
         />
       </div>
 
-      {searching && <p className="text-[10px] text-zinc-500 mt-2 font-mono animate-pulse">Searching...</p>}
+      {searching && <p className="text-[10px] text-zinc-500 mt-2 font-mono animate-pulse absolute">Searching...</p>}
 
       {results.length > 0 && (
-        <div className="mt-1 max-h-64 overflow-y-auto" data-testid="search-results">
+        <div className="absolute left-0 right-0 mt-1 max-h-64 overflow-y-auto z-50 bg-white dark:bg-[#0A0A0A] border border-slate-200 dark:border-white/10 rounded-md shadow-xl" data-testid="search-results">
           {results.map((stock, idx) => {
             const display = stock.groww_symbol || stock.ticker;
             const typeBadge = stock.type === 'INDEX' ? 'IDX' : (stock.exchange || 'NSE');

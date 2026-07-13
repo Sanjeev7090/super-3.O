@@ -1,7 +1,6 @@
 import React, { useState, useEffect, useRef, useCallback } from 'react';
 import axios from 'axios';
 import StockSearch from './StockSearch';
-import ChartPanel from './ChartPanel';
 import MultiChartLayout from './MultiChartLayout';
 import SignalDashboard from './SignalDashboard';
 import SquareOf9Calculator from './SquareOf9Calculator';
@@ -13,12 +12,7 @@ import ExplosiveVolumeAnalysis from './ExplosiveVolumeAnalysis';
 import GoldenSetupAnalysis from './GoldenSetupAnalysis';
 import AIIndicatorScore from './AIIndicatorScore';
 import GodzillaSetupAnalysis from './GodzillaSetupAnalysis';
-import GhostModeScanner from './GhostModeScanner';
-import Watchlist from './Watchlist';
-import PortfolioTracker from './PortfolioTracker';
-import AlertSystem from './AlertSystem';
 import GPTAnalysis from './GPTAnalysis';
-import CryptoList from './CryptoList';
 import CryptoDashboard from './CryptoDashboard';
 import AutoScanner from './AutoScanner';
 import SMCAnalysis from './SMCAnalysis';
@@ -28,27 +22,15 @@ import PACSOAnalysis from './PACSOAnalysis';
 import StockNewsPopup from './StockNewsPopup';
 import HybridDashboard from './hybrid/HybridDashboard';
 import GannQSCPanel from './GannQSCPanel';
-import RegulatoryWatchdogPanel from './RegulatoryWatchdogPanel';
 import AdvanceDeclineTicker from './AdvanceDeclineTicker';
 import NarrativeSwingAnalysis from './NarrativeSwingAnalysis';
 import HybridVWAPAnalysis from './HybridVWAPAnalysis';
-import RLAgentPanel from './RLAgentPanel';
-import RoboDashboard from './robo/RoboAdvisorDashboard';
-import EnsembleCockpitPanel from './EnsembleCockpitPanel';
-import SectorRotationPicker from './SectorRotationPicker';
-import MoneycontrolMovers from './MoneycontrolMovers';
-import PECETracker from './PECETracker';
 import VisualizeModal from './VisualizeModal';
 import Gann3DPanel from './Gann3DPanel';
-import PortfolioOptimizerPanel from './PortfolioOptimizerPanel';
 import AdvancedRiskPanel from './AdvancedRiskPanel';
-import SentimentPanel from './SentimentPanel';
-import ObservabilityPanel from './ObservabilityPanel';
 import VoiceCommandSystem from './VoiceCommandSystem';
 import OrderFlowPanel from './OrderFlowPanel';
 import KronosForecastPanel from './KronosForecastPanel';
-import AIRouterPanel from './AIRouterPanel';
-import GrowwPortfolio from './GrowwPortfolio';
 import IndicesTickerBar from './IndicesTickerBar';
 import TopOptionsSheet from './TopOptionsSheet';
 import OptionChainModal from './OptionChainModal';
@@ -56,50 +38,19 @@ import PutCallParityScanner from './PutCallParityScanner';
 import DeltaDashScoreboard from './DeltaDashScoreboard';
 import HybridBrainPanel from './HybridBrainPanel';
 import PaperTradingPanel from './PaperTradingPanel';
-import SectorTrending from './SectorTrending';
 import SectorStocksSheet from './SectorStocksSheet';
-import TopMoversWidget from './TopMoversWidget';
-import MonteCarloPanel from './robo/MonteCarloPanel';
-import MinerviniVCPPanel from './MinerviniVCPPanel';
-import LivermorePivotalPanel from './LivermorePivotalPanel';
-import CANSLIMPanel from './CANSLIMPanel';
-import PaulTudorPanel from './PaulTudorPanel';
 import TopTraderUniverseScan from './TopTraderUniverseScan';
+import SettingsDrawer from './SettingsDrawer';
+import OpenPositionsPanel from './OpenPositionsPanel';
 import { Toaster, toast } from 'sonner';
-import { Star, Wallet, Bell, ChartLineUp, List, CurrencyBtc, Lightning, Newspaper, Sun, Moon } from '@phosphor-icons/react';
+import {
+  Bell, ChartLineUp, List, Newspaper, Sun, Moon, X,
+  MagnifyingGlass, UsersThree, Notebook, GearSix, Pulse, ShieldWarning, Wallet,
+} from '@phosphor-icons/react';
 import { useTheme } from '../context/ThemeContext';
 
 const BACKEND_URL = process.env.REACT_APP_BACKEND_URL;
 const API = `${BACKEND_URL}/api`;
-
-// ── Quant Panel — aggregates all 4 advanced modules ──────────────────────────
-function QuantPanel({ selectedStock }) {
-  const [sub, setSub] = React.useState('portfolio');
-  const SUBS = [
-    { id: 'portfolio',    label: 'Portfolio' },
-    { id: 'risk',         label: 'Risk'      },
-    { id: 'sentiment',    label: 'Sentiment' },
-    { id: 'observability',label: 'Observ.'  },
-  ];
-  return (
-    <div>
-      <div className="flex gap-0 border-b border-zinc-800 bg-zinc-900/50 sticky top-0 z-10">
-        {SUBS.map(s => (
-          <button key={s.id} onClick={() => setSub(s.id)}
-            className={`px-3 py-2 text-[11px] font-bold uppercase tracking-wider border-b-2 transition-colors whitespace-nowrap ${sub === s.id ? 'border-yellow-500 text-yellow-400' : 'border-transparent text-zinc-500 hover:text-white'}`}
-            data-testid={`quant-sub-${s.id}`}>
-            {s.label}
-          </button>
-        ))}
-      </div>
-      {sub === 'portfolio'     && <PortfolioOptimizerPanel />}
-      {sub === 'risk'          && <AdvancedRiskPanel />}
-      {sub === 'sentiment'     && <SentimentPanel selectedStock={selectedStock} />}
-      {sub === 'observability' && <ObservabilityPanel selectedStock={selectedStock} />}
-    </div>
-  );
-}
-
 
 // Map yfinance tickers → Groww trading symbols (avoids stale-state issue)
 const YF_TO_GROWW = {
@@ -122,9 +73,11 @@ const TradingDashboard = () => {
   const [signal, setSignal] = useState(null);
   const [semiLogScale, setSemiLogScale] = useState(false);
   const [timeframe, setTimeframe] = useState({ multiplier: 1, timespan: 'day', label: '1D' });
-  const [activeTab, setActiveTab] = useState('scanner');
-  const [leftTab, setLeftTab] = useState('search');
-  const [mobilePanel, setMobilePanel] = useState('chart');
+  const [activeTab, setActiveTab] = useState('scan'); // scan | strategies | traders | paper (left nav)
+  const [rightPanelTab, setRightPanelTab] = useState('signals'); // signals | positions | risk
+  const [showSettings, setShowSettings] = useState(false);
+  const [settingsSection, setSettingsSection] = useState('robo');
+  const [mobilePanel, setMobilePanel] = useState('chart'); // left | chart | right
   const [cryptoChartDays, setCryptoChartDays] = useState(7);
   const [showNews, setShowNews] = useState(false);
   const [dataSource, setDataSource] = useState('groww'); // 'yahoo' | 'groww'
@@ -169,7 +122,7 @@ const TradingDashboard = () => {
   const handlePaperTradeFromSignal = (signal) => {
     setPendingPaperTrade({ ...signal, symbol: selectedStock?.ticker });
     setActiveTab('paper');
-    setMobilePanel('right');
+    setMobilePanel('left');
   };
 
   // Auto-execute paper trade handler (called when auto-execute is ON and new signal fires)
@@ -582,31 +535,25 @@ const TradingDashboard = () => {
   const isCrypto = selectedStock?.type === 'CRYPTO';
   const isOption = selectedStock?.type === 'OPTION';
 
-  const rightTabs = [
-    { id: 'scanner',    label: 'SCANNER',     shortLabel: 'SCAN'    },
-    { id: 'strategies', label: 'STRATEGIES',  shortLabel: 'STRAT'   },
-    { id: 'paper',      label: 'PAPER',       shortLabel: 'PAPER'   },
-    { id: 'rlagent',    label: 'RL AGENT',    shortLabel: 'RL'      },
-    { id: 'robo',       label: '🤖 ROBO',     shortLabel: '🤖ROBO'  },
-    { id: 'ensemble',   label: 'AI ASSEMBLE', shortLabel: 'AI ASM'  },
-    { id: 'picker',     label: 'PICKER',      shortLabel: 'PICK'    },
-    { id: 'pece',       label: 'PE-CE OI',    shortLabel: 'PE-CE'   },
-    { id: 'toptraders', label: 'TOP TRADERS', shortLabel: 'TRADERS' },
+  // Primary Left-Nav (SCAN / STRAT / TRADERS / PAPER) — SETTINGS opens the drawer
+  const sidebarNav = [
+    { id: 'scan',       label: 'SCAN',    icon: MagnifyingGlass },
+    { id: 'strategies', label: 'STRAT',   icon: ChartLineUp     },
+    { id: 'traders',    label: 'TRADERS', icon: UsersThree      },
+    { id: 'paper',      label: 'PAPER',   icon: Notebook        },
   ];
 
-  const leftTabs = [
-    { id: 'search', label: 'Search' },
-    { id: 'crypto', label: 'Crypto', icon: CurrencyBtc },
-    { id: 'watchlist', label: 'Watchlist', icon: Star },
-    { id: 'groww', label: 'Groww', icon: Lightning },
-    { id: 'portfolio', label: 'Portfolio', icon: Wallet },
-    { id: 'alerts', label: 'Alerts', icon: Bell },
+  // Right Panel tabs — Signals / Positions / Risk (tab-based, per user's explicit choice)
+  const rightPanelTabs = [
+    { id: 'signals',   label: 'SIGNALS',   icon: Pulse         },
+    { id: 'positions', label: 'POSITIONS', icon: Wallet        },
+    { id: 'risk',      label: 'RISK',      icon: ShieldWarning },
   ];
 
   const mobilePanels = [
-    { id: 'left', label: 'Menu', icon: List },
+    { id: 'left',  label: 'Menu',  icon: List        },
     { id: 'chart', label: 'Chart', icon: ChartLineUp },
-    { id: 'right', label: 'Strategies', icon: Star },
+    { id: 'right', label: 'Panel', icon: Pulse       },
   ];
 
   return (
@@ -621,163 +568,119 @@ const TradingDashboard = () => {
       {/* Normal Gann Trader UI (hidden when hybrid mode is on) */}
       {!hybridMode && (<>
 
-      {/* Header */}
-      <header className="h-12 md:h-14 border-b border-slate-200 dark:border-white/10 flex items-center justify-between px-3 lg:px-6 bg-white/90 dark:bg-[#0A0A0A]/90 backdrop-blur-md z-50 shrink-0 transition-colors duration-200" data-testid="dashboard-header">
-        <div className="flex items-center gap-3">
-          <div
-            className="liquid-glass-brand flex flex-col cursor-pointer leading-none"
-            onClick={() => window.location.href = '/'}
-            data-testid="brand-logo"
-            title="Go to Home"
+      {/* ══════════════════ TOP BAR ══════════════════ */}
+      <header className="h-14 md:h-16 border-b border-slate-200 dark:border-white/10 flex items-center gap-2 md:gap-4 px-2 md:px-4 bg-white/95 dark:bg-[#0A0A0A]/95 backdrop-blur-md z-50 shrink-0 transition-colors duration-200" data-testid="dashboard-header">
+        {/* Mobile hamburger — toggles left nav drawer */}
+        <button
+          onClick={() => setMobilePanel(mobilePanel === 'left' ? 'chart' : 'left')}
+          className="md:hidden p-2 rounded-md border border-slate-200 dark:border-white/10 text-slate-600 dark:text-zinc-300 hover:bg-slate-100 dark:hover:bg-white/10 transition-colors shrink-0"
+          data-testid="mobile-sidebar-toggle"
+        >
+          <List size={16} weight="bold" />
+        </button>
+
+        {/* Brand */}
+        <div
+          className="liquid-glass-brand flex flex-col cursor-pointer leading-none shrink-0"
+          onClick={() => window.location.href = '/'}
+          data-testid="brand-logo"
+          title="Go to Home"
+        >
+          <h1
+            className="text-sm md:text-lg font-black tracking-tighter uppercase leading-none"
+            style={{ fontFamily: "'Chivo', sans-serif" }}
           >
-            <h1
-              className="text-sm md:text-lg font-black tracking-tighter uppercase leading-none"
-              style={{ fontFamily: "'Chivo', sans-serif" }}
-            >
-              <span className="text-slate-900 dark:text-white">Dreamer</span>
-              <span className="ml-1" style={{ fontFamily: 'serif', textTransform: 'none' }}>💤</span>
-            </h1>
-            <span className="text-[8px] font-medium tracking-[0.22em] uppercase text-[#00E676]/70 leading-none mt-0.5 hidden sm:block">
-              AI-Powered Trading
-            </span>
-          </div>
-          <span className="hidden sm:inline text-[10px] text-slate-400 dark:text-zinc-500 font-mono tracking-wider border border-slate-200 dark:border-white/10 px-2 py-0.5">
-            {isCrypto ? 'CRYPTO' : 'NSE'}
+            <span className="text-slate-900 dark:text-white">Dreamer</span>
+            <span className="ml-1" style={{ fontFamily: 'serif', textTransform: 'none' }}>💤</span>
+          </h1>
+          <span className="text-[8px] font-medium tracking-[0.22em] uppercase text-[#00E676]/70 leading-none mt-0.5 hidden xl:block">
+            KRONOS AI TRADING
           </span>
         </div>
-        <div className="flex items-center gap-2 md:gap-3">
-          {selectedStock && (
-            <div className="flex items-center gap-1.5">
-              {isCrypto && selectedStock.image && (
-                <img src={selectedStock.image} alt="" className="w-4 h-4 rounded-full" />
-              )}
-              <span className="text-[10px] md:text-xs font-mono text-[#00E676]" data-testid="selected-ticker">
-                {isCrypto
-                  ? selectedStock.symbol?.toUpperCase()
-                  : isOption
-                  ? selectedStock.name
-                  : selectedStock.ticker}
-              </span>
-              {!isOption && (
-                <span className="hidden sm:inline text-[10px] text-zinc-500">{selectedStock.name}</span>
-              )}
-              {isOption && selectedStock.expiry && (
-                <span className="hidden sm:inline text-[10px] text-zinc-500">Exp {selectedStock.expiry}</span>
-              )}
-              {!isCrypto && !isOption && (
-                <button
-                  onClick={() => setShowNews(true)}
-                  className="ml-1 p-1 rounded hover:bg-slate-100 dark:hover:bg-white/10 transition-colors"
-                  title="View News"
-                  data-testid="news-btn"
-                >
-                  <Newspaper size={14} className="text-sky-400" />
-                </button>
-              )}
-            </div>
+
+        {/* Big Live Index Tickers — NIFTY / BANKNIFTY / SENSEX (tap → top options) */}
+        <div className="flex-1 min-w-0 overflow-hidden">
+          <IndicesTickerBar onIndexClick={handleIndexClick} />
+        </div>
+
+        {/* Right cluster */}
+        <div className="flex items-center gap-1.5 md:gap-2 shrink-0">
+          {/* Global Stock/Crypto Search — desktop only (mobile has its own bar below) */}
+          <div className="hidden md:block w-44 lg:w-64" data-testid="topbar-search">
+            <StockSearch onStockSelect={handleStockSelect} selectedStock={selectedStock} />
+          </div>
+
+          {selectedStock && !isCrypto && !isOption && (
+            <button
+              onClick={() => setShowNews(true)}
+              className="p-1.5 rounded-md border border-slate-200 dark:border-white/10 text-sky-500 hover:bg-slate-100 dark:hover:bg-white/10 transition-all"
+              title="View News"
+              data-testid="news-btn"
+            >
+              <Newspaper size={15} />
+            </button>
           )}
-          {/* THEME TOGGLE BUTTON */}
+
+          {/* RL AGENT BACKGROUND TRAINING INDICATOR — jumps into Settings drawer */}
+          {rlStatus?.status === 'training' && (
+            <button
+              onClick={() => { setShowSettings(true); setSettingsSection('rlagent'); }}
+              data-testid="rl-training-indicator"
+              title={`DreamerV3 Training — Ep ${rlStatus.episode} · ${(rlStatus.timesteps_done/1000).toFixed(1)}K/${(rlStatus.timesteps_total/1000).toFixed(0)}K steps`}
+              className="flex items-center gap-1 px-1.5 py-1 rounded border border-amber-500/40 bg-amber-500/10 hover:bg-amber-500/20 transition-all cursor-pointer"
+            >
+              <span className="relative flex h-1.5 w-1.5">
+                <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-amber-400 opacity-75" />
+                <span className="relative inline-flex rounded-full h-1.5 w-1.5 bg-amber-500" />
+              </span>
+              <span className="text-[8px] font-bold text-amber-400 uppercase tracking-widest hidden lg:inline whitespace-nowrap">
+                DV3 · {Math.round((rlStatus.timesteps_done / rlStatus.timesteps_total) * 100)}%
+              </span>
+            </button>
+          )}
+
+          {/* THEME TOGGLE */}
           <button
             onClick={toggleTheme}
             className="p-1.5 rounded-md border border-slate-200 dark:border-white/10 text-slate-500 dark:text-zinc-400 hover:bg-slate-100 dark:hover:bg-white/10 hover:text-slate-800 dark:hover:text-white transition-all duration-200"
             title={theme === 'dark' ? 'Switch to Light Mode' : 'Switch to Dark Mode'}
             data-testid="theme-toggle"
           >
-            {theme === 'dark'
-              ? <Sun size={14} weight="bold" />
-              : <Moon size={14} weight="bold" />
-            }
-          </button>
-          {/* VISUALIZE BUTTON */}
-          <button
-            onClick={() => setShowVisualize(true)}
-            className="liquid-glass-btn flex items-center gap-1.5 text-[10px] font-bold uppercase tracking-widest border border-violet-500/50 text-violet-400 hover:bg-violet-500/20 hover:border-violet-500 px-2.5 py-1.5 rounded"
-            data-testid="visualize-btn"
-            title="Heatmaps · Correlation · Options Flow"
-          >
-            <span className="text-[10px]">VISUAL</span>
-          </button>
-          {/* 3D CHARTS BUTTON */}
-          <button
-            onClick={() => setShow3D(true)}
-            className="liquid-glass-btn flex items-center gap-1.5 text-[10px] font-bold uppercase tracking-widest border border-cyan-500/50 text-cyan-400 hover:bg-cyan-500/20 hover:border-cyan-500 px-2.5 py-1.5 rounded"
-            data-testid="gann3d-btn"
-            title="3D Gann · Price Surface · Astro Cycles"
-          >
-            <span className="text-[10px]">3D</span>
-          </button>
-          {/* PUT-CALL PARITY F&O SCANNER BUTTON */}
-          <button
-            onClick={() => setShowParityScanner(true)}
-            className="liquid-glass-btn flex items-center gap-1.5 text-[10px] font-bold uppercase tracking-widest border border-yellow-500/50 text-yellow-400 hover:bg-yellow-500/20 hover:border-yellow-500 px-2.5 py-1.5 rounded"
-            data-testid="parity-scanner-btn"
-            title="One-Click Put-Call Parity F&O Scanner — finds best arbitrage live"
-          >
-            <span className="text-sm">⚡</span>
-            <span className="hidden sm:inline">PARITY</span>
-          </button>
-          {/* DELTADASH SCOREBOARD BUTTON */}
-          <button
-            onClick={() => setShowDeltaDash(true)}
-            className="liquid-glass-btn flex items-center gap-1.5 text-[10px] font-bold uppercase tracking-widest border border-indigo-500/50 text-indigo-400 hover:bg-indigo-500/20 hover:border-indigo-400 px-2.5 py-1.5 rounded transition-all"
-            data-testid="deltadash-btn"
-            title="DeltaDash Multi-Timeframe Analysis Scoreboard"
-          >
-            <span className="text-[10px] font-black">dd</span>
-            <span className="hidden sm:inline">DELTA</span>
-          </button>
-          {/* DREAMER V3 ROBO-TRADER BUTTON */}
-          <button
-            onClick={() => { setActiveTab('robo'); setMobilePanel('right'); }}
-            className="liquid-glass-btn flex items-center gap-1.5 text-[10px] font-bold uppercase tracking-widest border border-violet-500/50 text-violet-400 hover:bg-violet-500/20 hover:border-violet-400 px-2.5 py-1.5 rounded transition-all"
-            data-testid="robo-trader-btn"
-            title="Dreamer V3 Robo-Trader"
-          >
-            <span className="text-sm">🤖</span>
-            <span className="hidden sm:inline">ROBO</span>
+            {theme === 'dark' ? <Sun size={15} weight="bold" /> : <Moon size={15} weight="bold" />}
           </button>
 
-          {/* RL AGENT BACKGROUND TRAINING INDICATOR — visible only when training & not on rlagent tab */}
-          {rlStatus?.status === 'training' && activeTab !== 'rlagent' && (
-            <button
-              onClick={() => { setActiveTab('rlagent'); setMobilePanel('right'); }}
-              data-testid="rl-training-indicator"
-              title={`DreamerV3 Training — Ep ${rlStatus.episode} · ${(rlStatus.timesteps_done/1000).toFixed(1)}K/${(rlStatus.timesteps_total/1000).toFixed(0)}K steps`}
-              className="flex items-center gap-1.5 px-2 py-1 rounded border border-amber-500/40 bg-amber-500/10 hover:bg-amber-500/20 transition-all cursor-pointer"
-            >
-              <span className="relative flex h-2 w-2">
-                <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-amber-400 opacity-75" />
-                <span className="relative inline-flex rounded-full h-2 w-2 bg-amber-500" />
-              </span>
-              <span className="text-[9px] font-bold text-amber-400 uppercase tracking-widest hidden sm:inline whitespace-nowrap">
-                DV3 · Ep {rlStatus.episode} · {Math.round((rlStatus.timesteps_done / rlStatus.timesteps_total) * 100)}%
-              </span>
-              <span className="text-[9px] font-bold text-amber-400 uppercase tracking-widest sm:hidden">
-                DV3
-              </span>
-            </button>
-          )}
+          {/* NOTIFICATIONS / ALERTS — opens Settings drawer at Alerts section */}
+          <button
+            onClick={() => { setShowSettings(true); setSettingsSection('alerts'); }}
+            className="p-1.5 rounded-md border border-slate-200 dark:border-white/10 text-slate-500 dark:text-zinc-400 hover:bg-slate-100 dark:hover:bg-white/10 hover:text-slate-800 dark:hover:text-white transition-all duration-200"
+            title="Alerts"
+            data-testid="notifications-btn"
+          >
+            <Bell size={15} weight="bold" />
+          </button>
         </div>
       </header>
+
+      {/* Mobile Search Bar — visible only on small screens */}
+      <div className="md:hidden border-b border-slate-200 dark:border-white/10 p-2 shrink-0 bg-white dark:bg-[#0A0A0A]" data-testid="mobile-search-bar">
+        <StockSearch onStockSelect={handleStockSelect} selectedStock={selectedStock} />
+      </div>
 
       {/* NIFTY 50 Advance / Decline Ticker — animated bull/bear + live 50-stock modal */}
       <AdvanceDeclineTicker />
 
-      {/* Indices Live Ticker — NIFTY 50 / SENSEX / BANK NIFTY (tap → top options) */}
-      <IndicesTickerBar onIndexClick={handleIndexClick} />
-
-      {/* Mobile Tab Bar — full-width 3-panel nav · hidden on md+ (iPad/laptop show full grid) */}
-      <div className="flex md:hidden border-b border-slate-200 dark:border-white/10 shrink-0 bg-white dark:bg-[#0D0D0D] transition-colors duration-200">
+      {/* Mobile Tab Bar — full-width 3-panel nav · hidden on lg+ (desktop shows full grid) */}
+      <div className="flex lg:hidden border-b border-slate-200 dark:border-white/10 shrink-0 bg-white dark:bg-[#0D0D0D] transition-colors duration-200">
         {mobilePanels.map(p => (
           <button key={p.id} onClick={() => setMobilePanel(p.id)}
             className={`flex-1 py-2.5 flex flex-col items-center justify-center gap-0.5 transition-all duration-200 relative ${
               mobilePanel === p.id
-                ? 'text-[#00E676]'
+                ? 'text-[#007AFF]'
                 : 'text-slate-400 dark:text-zinc-500'
             }`}
             data-testid={`mobile-panel-${p.id}`}>
             {mobilePanel === p.id && (
-              <span className="absolute top-0 inset-x-4 h-0.5 bg-[#00E676] rounded-b-full" />
+              <span className="absolute top-0 inset-x-4 h-0.5 bg-[#007AFF] rounded-b-full" />
             )}
             <p.icon size={18} weight={mobilePanel === p.id ? 'fill' : 'regular'} />
             <span className="text-[9px] font-bold uppercase tracking-wider whitespace-nowrap">{p.label}</span>
@@ -785,104 +688,35 @@ const TradingDashboard = () => {
         ))}
       </div>
 
-      {/* Main Grid — flex-1 to fill remaining space · md: = 768px (iPad+) shows 3-col grid */}
+      {/* ══════════════════ MAIN GRID ══════════════════ */}
       <div className="flex-1 flex flex-col md:grid md:grid-cols-12 overflow-hidden min-h-0">
 
-        {/* Left Sidebar */}
-        <aside className={`lg:col-span-3 xl:col-span-2 border-r border-slate-200 dark:border-white/10 bg-white dark:bg-[#0A0A0A] flex flex-col overflow-y-auto transition-colors duration-200 ${mobilePanel !== 'left' ? 'hidden lg:flex' : 'flex'}`} data-testid="left-sidebar">
-          {/* Left Tabs — horizontally scrollable on mobile */}
-          <div className="flex border-b border-slate-200 dark:border-white/10 shrink-0 overflow-x-auto scrollbar-none bg-white dark:bg-[#0A0A0A]">
-            {leftTabs.map(tab => (
-              <button key={tab.id} onClick={() => setLeftTab(tab.id)}
-                className={`flex-shrink-0 flex-1 min-w-[56px] py-2.5 px-1 text-[9px] font-bold uppercase tracking-[0.1em] transition-colors whitespace-nowrap ${
-                  leftTab === tab.id
-                    ? 'text-[#00E676] border-b-2 border-[#00E676] bg-[#00E676]/10 dark:bg-white/5'
-                    : 'text-slate-400 dark:text-zinc-500 hover:text-slate-600 dark:hover:text-zinc-300'
+        {/* Left Sidebar — Nav (SCAN/STRAT/TRADERS/PAPER/SETTINGS) + section content */}
+        <aside className={`lg:col-span-3 xl:col-span-2 border-r border-slate-200 dark:border-white/10 bg-white dark:bg-[#0A0A0A] flex flex-col overflow-hidden transition-colors duration-200 ${mobilePanel !== 'left' ? 'hidden lg:flex' : 'flex'}`} data-testid="left-sidebar">
+          {/* Primary Nav row */}
+          <div className="flex border-b border-slate-200 dark:border-white/10 shrink-0 bg-white dark:bg-[#0A0A0A]">
+            {sidebarNav.map(tab => (
+              <button key={tab.id} onClick={() => { setActiveTab(tab.id); setMobilePanel('left'); }}
+                className={`flex-1 flex flex-col items-center gap-0.5 py-2 px-0.5 border-b-2 transition-all duration-150 ${
+                  activeTab === tab.id
+                    ? 'border-[#007AFF] text-[#007AFF] bg-[#007AFF]/5'
+                    : 'border-transparent text-slate-400 dark:text-zinc-500 hover:text-slate-700 dark:hover:text-zinc-200'
                 }`}
-                data-testid={`left-tab-${tab.id}`}>
-                {tab.label}
+                data-testid={`sidebar-nav-${tab.id}`}>
+                <tab.icon size={15} weight={activeTab === tab.id ? 'fill' : 'regular'} />
+                <span className="text-[7.5px] font-bold uppercase tracking-[0.08em]">{tab.label}</span>
               </button>
             ))}
+            <button onClick={() => setShowSettings(true)}
+              className="flex-1 flex flex-col items-center gap-0.5 py-2 px-0.5 border-b-2 border-transparent text-slate-400 dark:text-zinc-500 hover:text-slate-700 dark:hover:text-zinc-200 transition-all duration-150"
+              data-testid="sidebar-nav-settings">
+              <GearSix size={15} />
+              <span className="text-[7.5px] font-bold uppercase tracking-[0.08em]">SETTINGS</span>
+            </button>
           </div>
 
           <div className="flex-1 overflow-y-auto">
-            {leftTab === 'search' && (
-              <>
-                <div className="p-3 border-b border-white/10">
-                  <StockSearch onStockSelect={handleStockSelect} selectedStock={selectedStock} />
-                </div>
-                {/* GannQSC — super-fast in-RAM signal (auto-feeds when chart loads) */}
-                {stockData?.bars?.length > 0 && selectedStock && (
-                  <div className="border-b border-white/10 p-3">
-                    <GannQSCPanel
-                      bars={stockData.bars}
-                      ticker={isCrypto ? selectedStock.symbol : selectedStock.ticker}
-                    />
-                  </div>
-                )}
-                {/* Regulatory Watchdog — global + Indian market sentiment */}
-                <div className="border-b border-white/10 p-3">
-                  <RegulatoryWatchdogPanel />
-                </div>
-                {/* Sector Trending — top NSE sector movers */}
-                <SectorTrending onSectorSelect={(sector) => setSectorSheet(sector)} />
-
-                {/* Top Movers Today */}
-                <TopMoversWidget onStockSelect={(stock) => {
-                  setSelectedStock({ ticker: stock.ticker, name: stock.name, type: 'stock' });
-                  const tf = { multiplier: 1, timespan: 'day', label: '1D' };
-                  setTimeframe(tf);
-                  fetchStockData(stock.ticker, tf);
-                  setMobilePanel('chart');
-                }} />
-                {signal && <div className="border-b border-white/10"><SignalDashboard signal={signal} /></div>}
-                {stockData && !isCrypto && <div className="border-b border-white/10"><SquareOf9Calculator currentPrice={stockData.bars[stockData.bars.length - 1]?.close} /></div>}
-                {selectedStock && selectedStock.type === 'INDEX' && <div className="border-b border-white/10"><OIAnalysis symbol={selectedStock.ticker.replace('.NS', '')} /></div>}
-              </>
-            )}
-            {leftTab === 'crypto' && (
-              <CryptoList onCryptoSelect={handleCryptoSelect} selectedCrypto={isCrypto ? selectedStock : null} />
-            )}
-            {leftTab === 'watchlist' && <Watchlist onStockSelect={handleStockSelect} selectedStock={selectedStock} />}
-            {leftTab === 'groww' && <GrowwPortfolio />}
-            {leftTab === 'portfolio' && <PortfolioTracker selectedStock={selectedStock} />}
-            {leftTab === 'alerts' && <AlertSystem selectedStock={selectedStock} />}
-          </div>
-        </aside>
-
-        {/* Center — Multi Chart */}
-        <main className={`flex-1 lg:col-span-6 xl:col-span-7 flex flex-col relative min-h-0 overflow-hidden ${mobilePanel !== 'chart' ? 'hidden lg:flex' : 'flex'}`} data-testid="center-chart">
-          {/* Multi-chart panel — fixed height block */}
-          <div className="shrink-0" style={{ height: 'min(62vh, 580px)', minHeight: '340px' }}>
-            <MultiChartLayout
-              initialStock={selectedStock}
-              initialStockData={stockData}
-              initialLoading={loading}
-              initialTimeframe={timeframe}
-              initialDataSource={dataSource}
-              onPrimaryStockChange={(stock) => {
-                // When user picks a stock in chart slot-1, sync it to left sidebar state too
-                if (stock && stock.ticker !== selectedStock?.ticker) {
-                  handleStockSelect(stock);
-                }
-              }}
-              onOpenOptionChain={(payload) => setShowOptionChain(payload)}
-            />
-          </div>
-          {/* Footprint Panel — below chart, auto-fetches when stock loaded */}
-          {stockData?.bars?.length >= 30 && (
-            <OrderFlowPanel stockData={stockData} selectedStock={selectedStock} />
-          )}
-          {/* Kronos AI Forecast — below Order Flow */}
-          <KronosForecastPanel selectedStock={selectedStock} timeframe={timeframe} />
-        </main>
-
-        {/* Right Sidebar */}
-        <aside className={`lg:col-span-3 border-l border-slate-200 dark:border-white/10 bg-white dark:bg-[#0A0A0A] flex flex-col overflow-hidden transition-colors duration-200 ${mobilePanel !== 'right' ? 'hidden lg:flex' : 'flex'}`} data-testid="right-sidebar">
-          <div className="flex flex-1 min-h-0">
-            {/* Tab Content — left side */}
-            <div className="flex-1 overflow-y-auto min-w-0 order-first">
-            {activeTab === 'scanner' && (
+            {activeTab === 'scan' && (
               <AutoScanner
                 selectedStock={selectedStock}
                 onPaperTrade={handlePaperTradeFromSignal}
@@ -918,8 +752,14 @@ const TradingDashboard = () => {
                     <p className="text-slate-400 dark:text-zinc-500 text-sm">Select a stock or crypto to view strategies</p>
                   </div>
                 )}
-
               </div>
+            )}
+
+            {activeTab === 'traders' && (
+              <TopTraderUniverseScan
+                selectedStock={selectedStock}
+                onStockLoad={handleTopTraderStockLoad}
+              />
             )}
 
             {activeTab === 'paper' && (
@@ -931,75 +771,123 @@ const TradingDashboard = () => {
                 onAutoExecuteChange={setPaperAutoExecute}
               />
             )}
+          </div>
+        </aside>
 
-            {/* RL AGENT — always mounted so training continues in background */}
-            <div style={{ display: activeTab === 'rlagent' ? 'block' : 'none' }}>
-              <RLAgentPanel selectedStock={selectedStock} />
-            </div>
-
-            {/* ROBO — always mounted so polling loop continues in background */}
-            <div style={{ display: activeTab === 'robo' ? 'block' : 'none' }}>
-              <RoboDashboard selectedStock={selectedStock} onSelectStock={handleStockSelect} />
-            </div>
-
-            {activeTab === 'ensemble' && (
-              <div className="space-y-3 p-2">
-                <EnsembleCockpitPanel selectedStock={selectedStock} />
-                <MonteCarloPanel initialCapital={100000} />
-              </div>
+        {/* Center — Live Chart + Key Indicators */}
+        <main className={`flex-1 lg:col-span-6 xl:col-span-7 flex flex-col relative min-h-0 overflow-y-auto ${mobilePanel !== 'chart' ? 'hidden lg:flex' : 'flex'}`} data-testid="center-chart">
+          {/* Multi-chart panel — fixed height block */}
+          <div className="shrink-0" style={{ height: 'min(56vh, 540px)', minHeight: '320px' }}>
+            <MultiChartLayout
+              initialStock={selectedStock}
+              initialStockData={stockData}
+              initialLoading={loading}
+              initialTimeframe={timeframe}
+              initialDataSource={dataSource}
+              onPrimaryStockChange={(stock) => {
+                // When user picks a stock in chart slot-1, sync it to sidebar state too
+                if (stock && stock.ticker !== selectedStock?.ticker) {
+                  handleStockSelect(stock);
+                }
+              }}
+              onOpenOptionChain={(payload) => setShowOptionChain(payload)}
+            />
+          </div>
+          {/* Key Indicators — Order Flow, Kronos Forecast, GannQSC, Square of 9 */}
+          <div className="shrink-0 border-t border-slate-200 dark:border-white/10 px-2 py-2 space-y-2" data-testid="key-indicators-strip">
+            <p className="text-[9px] font-bold uppercase tracking-[0.15em] text-slate-400 dark:text-zinc-500 px-1">Key Indicators</p>
+            {stockData?.bars?.length >= 30 && (
+              <OrderFlowPanel stockData={stockData} selectedStock={selectedStock} />
             )}
-
-            {activeTab === 'picker' && (
-              <>
-                <SectorRotationPicker onStockSelect={handleStockSelect} />
-                <MoneycontrolMovers
-                  onPaperTrade={(sig) => {
-                    setPendingPaperTrade({ ...sig, symbol: sig.symbol });
-                    setActiveTab('paper');
-                    setMobilePanel('right');
-                  }}
-                />
-              </>
-            )}
-
-            {activeTab === 'pece' && (
-              <PECETracker />
-            )}
-
-            {activeTab === 'toptraders' && (
-              <TopTraderUniverseScan
-                selectedStock={selectedStock}
-                onStockLoad={handleTopTraderStockLoad}
+            <KronosForecastPanel selectedStock={selectedStock} timeframe={timeframe} />
+            {stockData?.bars?.length > 0 && selectedStock && (
+              <GannQSCPanel
+                bars={stockData.bars}
+                ticker={isCrypto ? selectedStock.symbol : selectedStock.ticker}
               />
             )}
-            {activeTab === 'quant' && (
-              <div className="space-y-0">
-                {/* Sub-tab nav */}
-                <QuantPanel selectedStock={selectedStock} />
+            {stockData && !isCrypto && (
+              <SquareOf9Calculator currentPrice={stockData.bars[stockData.bars.length - 1]?.close} />
+            )}
+          </div>
+        </main>
+
+        {/* Right Panel — Tab-based: Signals / Positions / Risk */}
+        <aside className={`lg:col-span-3 border-l border-slate-200 dark:border-white/10 bg-white dark:bg-[#141414] flex flex-col overflow-hidden transition-colors duration-200 ${mobilePanel !== 'right' ? 'hidden lg:flex' : 'flex'}`} data-testid="right-panel">
+          <div className="flex shrink-0 border-b border-slate-200 dark:border-white/10">
+            {rightPanelTabs.map(tab => (
+              <button key={tab.id} onClick={() => setRightPanelTab(tab.id)}
+                className={`flex-1 flex items-center justify-center gap-1 py-2.5 text-[10px] font-bold uppercase tracking-wider border-b-2 transition-all ${
+                  rightPanelTab === tab.id
+                    ? 'border-[#007AFF] text-[#007AFF] bg-[#007AFF]/5'
+                    : 'border-transparent text-slate-400 dark:text-zinc-500 hover:text-slate-700 dark:hover:text-zinc-200'
+                }`}
+                data-testid={`right-panel-tab-${tab.id}`}>
+                <tab.icon size={13} weight={rightPanelTab === tab.id ? 'fill' : 'regular'} />
+                <span className="hidden sm:inline">{tab.label}</span>
+              </button>
+            ))}
+          </div>
+
+          <div className="flex-1 overflow-y-auto">
+            {rightPanelTab === 'signals' && (
+              <div className="divide-y divide-slate-200 dark:divide-white/10">
+                {signal ? (
+                  <SignalDashboard signal={signal} />
+                ) : (
+                  <div className="p-6 text-center">
+                    <p className="text-slate-400 dark:text-zinc-500 text-xs">
+                      Select a pivot point on the chart to generate a live AI signal.
+                    </p>
+                  </div>
+                )}
+                {selectedStock && selectedStock.type === 'INDEX' && (
+                  <OIAnalysis symbol={selectedStock.ticker.replace('.NS', '')} />
+                )}
               </div>
             )}
-            </div>
 
-            {/* Vertical Tabs — compact right strip */}
-            <nav className="shrink-0 w-[52px] md:w-[60px] lg:w-[68px] flex flex-col border-l border-slate-200 dark:border-white/10 bg-slate-50 dark:bg-[#0D0D0D] overflow-y-auto scrollbar-none order-last" data-testid="right-tabs-nav">
-              {rightTabs.map(tab => (
-                <button key={tab.id} onClick={() => setActiveTab(tab.id)}
-                  className={`relative py-2.5 md:py-3 px-1 text-[7px] md:text-[8px] lg:text-[8.5px] font-bold uppercase tracking-[0.04em] transition-all whitespace-nowrap text-center leading-tight ${
-                    activeTab === tab.id
-                      ? 'text-[#00E676] bg-[#00E676]/10 dark:bg-[#00E676]/5'
-                      : 'text-slate-400 dark:text-zinc-500 hover:text-slate-600 dark:hover:text-zinc-300 hover:bg-slate-100 dark:hover:bg-white/5'
-                  }`}
-                  data-testid={`tab-${tab.id}`}>
-                  {activeTab === tab.id && (
-                    <span className="absolute right-0 top-1 bottom-1 w-[2px] bg-[#00E676] rounded-l-full" />
-                  )}
-                  {tab.shortLabel || tab.label}
-                </button>
-              ))}
-            </nav>
+            {rightPanelTab === 'positions' && <OpenPositionsPanel />}
+
+            {rightPanelTab === 'risk' && <AdvancedRiskPanel />}
           </div>
         </aside>
       </div>
+
+      {/* Settings Drawer — always mounted so Robo/RL background loops never stop */}
+      <SettingsDrawer
+        open={showSettings}
+        onClose={() => setShowSettings(false)}
+        section={settingsSection}
+        setSection={setSettingsSection}
+        selectedStock={selectedStock}
+        isCrypto={isCrypto}
+        onStockSelect={handleStockSelect}
+        onCryptoSelect={handleCryptoSelect}
+        onSectorSelect={(sector) => { setSectorSheet(sector); setShowSettings(false); }}
+        onTopMoverSelect={(stock) => {
+          setSelectedStock({ ticker: stock.ticker, name: stock.name, type: 'stock' });
+          const tf = { multiplier: 1, timespan: 'day', label: '1D' };
+          setTimeframe(tf);
+          fetchStockData(stock.ticker, tf);
+          setMobilePanel('chart');
+          setShowSettings(false);
+        }}
+        onMoneycontrolPaperTrade={(sig) => {
+          setPendingPaperTrade({ ...sig, symbol: sig.symbol });
+          setActiveTab('paper');
+          setMobilePanel('left');
+          setShowSettings(false);
+        }}
+        onOpenTool={(tool) => {
+          setShowSettings(false);
+          if (tool === 'visualize') setShowVisualize(true);
+          else if (tool === '3d') setShow3D(true);
+          else if (tool === 'parity') setShowParityScanner(true);
+          else if (tool === 'deltadash') setShowDeltaDash(true);
+          else if (tool === 'hybridbrain') setShowHybridBrain(true);
+        }}
+      />
 
       {/* Visualize Modal */}
       {showVisualize && (
@@ -1048,18 +936,29 @@ const TradingDashboard = () => {
           const stock = { ticker: symbol, name: symbol.replace('.NS',''), type: 'stock' };
           handleStockSelect(stock);
         }}
-        onNavigate={(tabId) => setActiveTab(tabId)}
+        onNavigate={(tabId) => {
+          const LEFT_IDS = ['scan', 'strategies', 'traders', 'paper'];
+          const idMap = { scanner: 'scan' };
+          const mapped = idMap[tabId] || tabId;
+          if (LEFT_IDS.includes(mapped)) {
+            setActiveTab(mapped);
+            setMobilePanel('left');
+          } else {
+            setShowSettings(true);
+            setSettingsSection(mapped === 'monte' ? 'ensemble' : mapped);
+          }
+        }}
         onSetAlert={(price) => {
-          setActiveTab('scanner');
-          setMobilePanel('right');
+          setActiveTab('scan');
+          setMobilePanel('left');
         }}
         onRunStrategy={(strat) => {
           setActiveTab('strategies');
-          setMobilePanel('right');
+          setMobilePanel('left');
         }}
         onScanMarket={() => {
-          setActiveTab('scanner');
-          setMobilePanel('right');
+          setActiveTab('scan');
+          setMobilePanel('left');
         }}
       />
 
