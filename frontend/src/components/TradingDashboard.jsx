@@ -560,7 +560,7 @@ const TradingDashboard = () => {
         {/* Mobile hamburger — toggles left nav drawer */}
         <button
           onClick={() => setMobilePanel(mobilePanel === 'left' ? 'chart' : 'left')}
-          className="md:hidden p-2 rounded-md border border-slate-200 dark:border-white/10 text-slate-600 dark:text-zinc-300 hover:bg-slate-100 dark:hover:bg-white/10 transition-colors shrink-0"
+          className="lg:hidden p-2 rounded-md border border-slate-200 dark:border-white/10 text-slate-600 dark:text-zinc-300 hover:bg-slate-100 dark:hover:bg-white/10 transition-colors shrink-0"
           data-testid="mobile-sidebar-toggle"
         >
           <List size={16} weight="bold" />
@@ -593,7 +593,7 @@ const TradingDashboard = () => {
         {/* Right cluster */}
         <div className="flex items-center gap-1.5 md:gap-2 shrink-0">
           {/* Global Stock/Crypto Search — desktop only (mobile has its own bar below) */}
-          <div className="hidden md:block w-44 lg:w-64" data-testid="topbar-search">
+          <div className="hidden lg:block lg:w-64" data-testid="topbar-search">
             <StockSearch onStockSelect={handleStockSelect} selectedStock={selectedStock} />
           </div>
 
@@ -648,8 +648,8 @@ const TradingDashboard = () => {
         </div>
       </header>
 
-      {/* Mobile Search Bar — visible only on small screens */}
-      <div className="md:hidden border-b border-slate-200 dark:border-white/10 p-2 shrink-0 bg-white dark:bg-[#0A0A0A]" data-testid="mobile-search-bar">
+      {/* Mobile Search Bar — visible below desktop (lg) */}
+      <div className="lg:hidden border-b border-slate-200 dark:border-white/10 p-2 shrink-0 bg-white dark:bg-[#0A0A0A]" data-testid="mobile-search-bar">
         <StockSearch onStockSelect={handleStockSelect} selectedStock={selectedStock} />
       </div>
 
@@ -676,7 +676,7 @@ const TradingDashboard = () => {
       </div>
 
       {/* ══════════════════ MAIN GRID ══════════════════ */}
-      <div className="flex-1 flex flex-col md:grid md:grid-cols-12 overflow-hidden min-h-0">
+      <div className="flex-1 flex flex-col lg:grid lg:grid-cols-12 overflow-hidden min-h-0">
 
         {/* Left Sidebar — Nav (SCAN/STRAT/TRADERS/PAPER/SETTINGS) + section content */}
         <aside className={`lg:col-span-3 xl:col-span-2 border-r border-slate-200 dark:border-white/10 bg-white dark:bg-[#0A0A0A] flex flex-col overflow-hidden transition-colors duration-200 ${mobilePanel !== 'left' ? 'hidden lg:flex' : 'flex'}`} data-testid="left-sidebar">

@@ -331,3 +331,13 @@ Clone trading app → Add dark/light mode, mobile responsiveness, MiroFish LangG
 
 **Testing**: 7/7 TF scenarios passed (1D, 15M, 1H, 5M, 1W, 30M, 4H) including multi-slot independent TF changes.
 
+
+---
+
+## Changes (Feb 2026) — Right Panel Removed + Refresh Button + Mobile Responsive Fix
+
+**Right Panel removed**: Completely removed from all devices (mobile + desktop). Removed aside block, state (rightPanelTab), imports (SignalDashboard, OIAnalysis, AdvancedRiskPanel, OpenPositionsPanel), icon imports (Pulse, ShieldWarning, Wallet). Center main now full width: lg:col-span-9 xl:col-span-10.
+
+**Refresh button**: Added to each MultiChartLayout chart slot — "just now / Xm ago" timestamp, manual refresh SVG icon, auto-refresh every 5 min for intraday TFs (1MIN–4H).
+
+**Mobile Responsive fix**: Root cause was md:grid md:grid-cols-12 activating grid at 768px with no md:col-span-X → center took 1/12 width. Fixed: lg:grid lg:grid-cols-12 (grid only at 1024px+). Aligned all breakpoints: hamburger lg:hidden, desktop search hidden lg:block, mobile search lg:hidden. Verified: 390px mobile shows full-width chart + MENU/CHART tabs correctly.
