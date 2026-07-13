@@ -102,7 +102,7 @@
 # Testing Data - Main Agent and testing sub agent both should log testing data below this section
 #====================================================================================================
 
-user_problem_statement: "Clone https://github.com/Sanjeev7090/superbrain repo 110% same to same"
+user_problem_statement: "Clone https://github.com/Sanjeev7090/super-2.0 repo 100% same to same everything"
 
 backend:
   - task: "Backend API server running (FastAPI + MongoDB)"
@@ -556,3 +556,5 @@ agent_communication:
     message: "POST-PULL VERIFICATION COMPLETE. Test Results: 16/17 tests passing (94.1% success rate). ✅ WORKING: (1) Core API health, (2) All 9 Robo-Trader Phase 2 endpoints (settings, status, risk-preview, capital-state, risk-report, recalculate, audit, recalc-history), (3) Auto Scanner with weighted confluence (21/100 score, WEAK label), (4) Multi-TF Scanner SSE streaming, (5) Stock bars endpoint, (6) Falling Knife strategy, (7) Golden Setup strategy, (8) Indices live. ❌ FAILING: DEMON strategy endpoint - 500 error due to tuple unpacking bug in run_mini_ai_indicator() function (returns 2 or 3 values inconsistently). Backend logs show: 'Error in demon analysis: too many values to unpack (expected 2)'. Root cause identified at server.py:5325 and lines 5150/5157/5160. All critical Robo-Trader functionality verified working post-pull."
   - agent: "main"
     message: "Implemented vertical tabs layout for right sidebar. Tabs (SCANNER, STRAT, PAPER, RL, ROBO, AI ASM, PICK, PE-CE, QNT) now stack vertically on the left side of the right panel with a green active indicator bar. Responsive across desktop (1920px), iPad (1024px), and mobile (390px). Also need to validate Auto-Discover feature (GET /api/robo/watchlist/discover) — backend endpoint verified working via curl, frontend UI in TargetCapitalSettings.jsx has Auto-Discover button. Previous testing agent got terminated before completing this validation."
+  - agent: "main"
+    message: "Cloned super-2.0 repo successfully. Code was already matching (only test file URLs differed). Created backend/.env (MONGO_URL, DB_NAME, EMERGENT_LLM_KEY) and frontend/.env (REACT_APP_BACKEND_URL). Installed CPU-only torch to fix CUDA error. Backend responding at /api/ with Gann Angles Trader message. Frontend running on port 3000 showing full DREAMER trading dashboard."
