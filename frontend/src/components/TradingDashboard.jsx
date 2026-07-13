@@ -553,7 +553,6 @@ const TradingDashboard = () => {
   const mobilePanels = [
     { id: 'left',  label: 'Menu',  icon: List        },
     { id: 'chart', label: 'Chart', icon: ChartLineUp },
-    { id: 'right', label: 'Panel', icon: Pulse       },
   ];
 
   return (
