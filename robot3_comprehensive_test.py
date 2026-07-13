@@ -9,7 +9,7 @@ import time
 import sys
 import subprocess
 
-BASE_URL = "https://stock-chart-grid.preview.emergentagent.com"
+BASE_URL = "https://ai-trading-grid-1.preview.emergentagent.com"
 API_URL = f"{BASE_URL}/api"
 
 def log_result(test_name, passed, details=""):
