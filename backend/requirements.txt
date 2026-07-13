@@ -161,3 +161,4 @@ xxhash==3.7.0
 requests-toolbelt==1.0.0
 zstandard==0.25.0
 orjson==3.11.9
+feedparser==6.0.12

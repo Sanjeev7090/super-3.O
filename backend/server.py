@@ -11021,44 +11021,24 @@ async def websocket_crypto_stream(websocket: WebSocket):
         logging.debug(f"Crypto WS client disconnect: {e}")
 
 
-# ======================= STOCK NEWS =======================
+# ======================= STOCK NEWS (RSS-based) =======================
 
 @api_router.get("/news/{ticker}")
 async def get_stock_news(ticker: str):
-    """Fetch latest news for a stock using yfinance"""
-    cache_key = f"news_{ticker}"
+    """Fetch latest news for a stock using multi-source RSS (ET, Google News)"""
+    cache_key = f"news_rss_{ticker}"
     cached = cache_storage.get(cache_key)
-    if cached and (datetime.now(timezone.utc) - cached['ts']).total_seconds() < 300:
+    if cached and (datetime.now(timezone.utc) - cached['ts']).total_seconds() < 600:
         return cached['data']
     try:
-        t = yf.Ticker(ticker)
-        raw_news = t.news or []
-        news_items = []
-        for item in raw_news[:10]:
-            content = item.get('content') or {}
-            if not isinstance(content, dict) or not content.get('title'):
-                continue
-            thumb = content.get('thumbnail') or {}
-            resolutions = thumb.get('resolutions', []) if isinstance(thumb, dict) else []
-            image_url = resolutions[0]['url'] if resolutions else None
-            provider = content.get('provider') or {}
-            provider_name = provider.get('displayName', '') if isinstance(provider, dict) else str(provider)
-            canonical = content.get('canonicalUrl') or {}
-            url = canonical.get('url', '') if isinstance(canonical, dict) else ''
-            news_items.append({
-                "title": content.get('title', ''),
-                "summary": (content.get('summary', '') or '')[:300],
-                "published": content.get('pubDate', ''),
-                "source": provider_name,
-                "url": url,
-                "image": image_url,
-            })
-        result = {"ticker": ticker, "news": news_items, "count": len(news_items)}
+        from agents.news_filter import fetch_news_for_ticker_async
+        news_items = await fetch_news_for_ticker_async(ticker, max_items=10)
+        result = {"ticker": ticker, "news": news_items, "count": len(news_items), "source": "rss"}
         cache_storage[cache_key] = {"data": result, "ts": datetime.now(timezone.utc)}
         return result
     except Exception as e:
-        logging.error(f"News fetch error for {ticker}: {e}")
-        return {"ticker": ticker, "news": [], "count": 0}
+        logging.error(f"News RSS fetch error for {ticker}: {e}")
+        return {"ticker": ticker, "news": [], "count": 0, "source": "rss"}
 
 
 # ======================= MIROFISH SWARM INTELLIGENCE =======================
@@ -12553,3 +12533,173 @@ async def ws_nse_tick(websocket: WebSocket):
         pass
     finally:
         await nse_tick_streamer.disconnect(websocket)
+
+
+# ======================= PROP SAFE MODE =======================
+
+class PropSafeConfigRequest(BaseModel):
+    enabled: bool = True
+    daily_loss_limit_pct: Optional[float] = None
+    max_drawdown_pct: Optional[float] = None
+
+@api_router.get("/propsafe/status")
+async def propsafe_status():
+    """Get PropSafe Mode status and current drawdown metrics"""
+    try:
+        from agents.prop_safe import prop_safe
+        return prop_safe.get_status()
+    except Exception as e:
+        return {"error": str(e), "enabled": False}
+
+@api_router.post("/propsafe/configure")
+async def propsafe_configure(req: PropSafeConfigRequest):
+    """Enable/disable PropSafe Mode and configure limits"""
+    try:
+        from agents.prop_safe import prop_safe
+        if req.enabled:
+            return prop_safe.enable(
+                daily_loss_limit_pct=req.daily_loss_limit_pct,
+                max_drawdown_pct=req.max_drawdown_pct,
+            )
+        else:
+            return prop_safe.disable()
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+@api_router.post("/propsafe/reset")
+async def propsafe_reset():
+    """Reset PropSafe breach flags (manual override)"""
+    try:
+        from agents.prop_safe import prop_safe
+        return prop_safe.reset_breaches()
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+# ======================= POSITION SIZING INTELLIGENCE =======================
+
+class PositionSizerRequest(BaseModel):
+    capital: float = 100000.0
+    current_price: float = 1000.0
+    win_rate: float = 0.55           # 55% win rate
+    avg_win_pct: float = 2.0         # avg winning trade = 2%
+    avg_loss_pct: float = 1.0        # avg losing trade = 1%
+    atr_pct: float = 1.5             # current ATR%
+    lot_size: int = 1
+    prop_safe_multiplier: float = 1.0
+
+@api_router.post("/position-sizer/calculate")
+async def position_sizer_calculate(req: PositionSizerRequest):
+    """Calculate Kelly Criterion + Volatility-based position size"""
+    try:
+        from agents.position_sizer import compute_position_size
+        return compute_position_size(
+            capital=req.capital,
+            win_rate=req.win_rate,
+            avg_win_pct=req.avg_win_pct,
+            avg_loss_pct=req.avg_loss_pct,
+            atr_pct=req.atr_pct,
+            current_price=req.current_price,
+            lot_size=req.lot_size,
+            prop_safe_multiplier=req.prop_safe_multiplier,
+        )
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+@api_router.get("/time-window")
+async def get_time_window():
+    """Get current NSE trading time window and its confidence multiplier"""
+    try:
+        from agents.position_sizer import get_time_window_info
+        return get_time_window_info()
+    except Exception as e:
+        return {"window": "unknown", "weight": 1.0, "error": str(e)}
+
+
+# ======================= NSE EVENT CALENDAR =======================
+
+@api_router.get("/events/upcoming")
+async def get_upcoming_events(days_ahead: int = 7):
+    """Get upcoming high-impact NSE events (expiry, budget, RBI, etc.)"""
+    try:
+        from agents.news_filter import get_upcoming_events, get_event_score_multiplier
+        events = get_upcoming_events(days_ahead=days_ahead)
+        event_mult = get_event_score_multiplier()
+        return {
+            "events": events,
+            "event_score_multiplier": event_mult,
+            "days_ahead": days_ahead,
+        }
+    except Exception as e:
+        return {"events": [], "event_score_multiplier": 1.0, "error": str(e)}
+
+
+# ── New Features Router (must be included AFTER api_router) ──────────────────
+_features_router = APIRouter(prefix="/api")
+
+@_features_router.get("/propsafe/status")
+async def _propsafe_status():
+    try:
+        from agents.prop_safe import prop_safe
+        return prop_safe.get_status()
+    except Exception as e:
+        return {"error": str(e), "enabled": False}
+
+@_features_router.post("/propsafe/configure")
+async def _propsafe_configure(req: PropSafeConfigRequest):
+    try:
+        from agents.prop_safe import prop_safe
+        if req.enabled:
+            return prop_safe.enable(
+                daily_loss_limit_pct=req.daily_loss_limit_pct,
+                max_drawdown_pct=req.max_drawdown_pct,
+            )
+        else:
+            return prop_safe.disable()
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+@_features_router.post("/propsafe/reset")
+async def _propsafe_reset():
+    try:
+        from agents.prop_safe import prop_safe
+        return prop_safe.reset_breaches()
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+@_features_router.post("/position-sizer/calculate")
+async def _position_sizer_calculate(req: PositionSizerRequest):
+    try:
+        from agents.position_sizer import compute_position_size
+        return compute_position_size(
+            capital=req.capital,
+            win_rate=req.win_rate,
+            avg_win_pct=req.avg_win_pct,
+            avg_loss_pct=req.avg_loss_pct,
+            atr_pct=req.atr_pct,
+            current_price=req.current_price,
+            lot_size=req.lot_size,
+            prop_safe_multiplier=req.prop_safe_multiplier,
+        )
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+@_features_router.get("/time-window")
+async def _get_time_window():
+    try:
+        from agents.position_sizer import get_time_window_info
+        return get_time_window_info()
+    except Exception as e:
+        return {"window": "unknown", "weight": 1.0, "error": str(e)}
+
+@_features_router.get("/events/upcoming")
+async def _get_upcoming_events(days_ahead: int = 7):
+    try:
+        from agents.news_filter import get_upcoming_events, get_event_score_multiplier
+        events = get_upcoming_events(days_ahead=days_ahead)
+        event_mult = get_event_score_multiplier()
+        return {"events": events, "event_score_multiplier": event_mult, "days_ahead": days_ahead}
+    except Exception as e:
+        return {"events": [], "event_score_multiplier": 1.0, "error": str(e)}
+
+app.include_router(_features_router)

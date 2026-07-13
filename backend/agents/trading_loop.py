@@ -46,6 +46,17 @@ logger = logging.getLogger(__name__)
 
 # ── Central Brain (HybridSuperBrain singleton) ──────────────────────────────
 from agents.hybrid_super_brain import HybridSuperBrain
+
+# ── PropSafe + Position Sizer ─────────────────────────────────────────────────
+try:
+    from agents.prop_safe import prop_safe
+except Exception:
+    prop_safe = None
+
+try:
+    from agents.position_sizer import get_time_window_info
+except Exception:
+    get_time_window_info = None
 try:
     from agents.hybrid_super_brain import hybrid_brain as brain
 except Exception:
@@ -79,6 +90,33 @@ W_TECHNICAL  = 0.40   # Technical composite weight
 # Volatility circuit breaker
 HIGH_VOL_ATR_PCT = 0.035   # ATR > 3.5% → "high volatility"
 EXTREME_VOL_PCT  = 0.055   # ATR > 5.5% → force HOLD
+
+
+def _adaptive_time_window_multiplier(now_ist: datetime) -> float:
+    """
+    A. Adaptive Time Window:
+    Returns a confidence multiplier based on current IST time.
+
+    9:15–10:00 → 1.50x (Opening Drive — highest momentum)
+    10:00–11:30 → 1.10x (Mid Morning — trend confirmation)
+    11:30–13:00 → 0.80x (Lunch zone — low volume, reduce sizing)
+    13:00–14:00 → 1.00x (Afternoon — normal)
+    14:00–15:30 → 1.20x (Closing Drive — secondary momentum)
+    """
+    h, m = now_ist.hour, now_ist.minute
+    t = h * 60 + m  # total minutes since midnight
+
+    if 9 * 60 + 15 <= t < 10 * 60:
+        return 1.50   # Opening Drive
+    elif 10 * 60 <= t < 11 * 60 + 30:
+        return 1.10   # Mid Morning
+    elif 11 * 60 + 30 <= t < 13 * 60:
+        return 0.80   # Lunch Zone
+    elif 13 * 60 <= t < 14 * 60:
+        return 1.00   # Afternoon
+    elif 14 * 60 <= t < 15 * 60 + 30:
+        return 1.20   # Closing Drive
+    return 1.00
 
 
 def _dynamic_conf_threshold(watchlist_obs: Dict[str, Dict]) -> int:
@@ -676,6 +714,22 @@ class TradingLoop:
 
             # C. Dynamic Confidence Threshold — scales up with market volatility
             dyn_threshold = _dynamic_conf_threshold(watchlist_obs)
+
+            # A. Adaptive Time Window — multiply confidence by time-based weight
+            time_mult = _adaptive_time_window_multiplier(now_ist)
+            logger.info("[TradingLoop][%s] Time window mult=%.2fx (%s IST)",
+                        cycle_id, time_mult, now_ist.strftime("%H:%M"))
+
+            # NSE Event Calendar — reduce sizing on high-impact event days
+            event_mult = 1.0
+            try:
+                from agents.news_filter import get_event_score_multiplier
+                event_mult = get_event_score_multiplier()
+                if event_mult < 1.0:
+                    logger.info("[TradingLoop][%s] Event calendar mult=%.2fx", cycle_id, event_mult)
+            except Exception:
+                pass
+
             logger.info("[TradingLoop][%s] Dynamic conf threshold = %d (from avg ATR of %d tickers)",
                         cycle_id, dyn_threshold, len(watchlist_obs))
 
@@ -694,13 +748,33 @@ class TradingLoop:
                 confidence = obs.get("confidence", 0)
                 live_price = obs.get("price", 0.0)
 
-                # C. Use dynamic threshold instead of hardcoded 58
-                if signal not in ("BUY", "SELL") or confidence <= dyn_threshold:
-                    logger.info("[TradingLoop][%s] %s -> HOLD (exec skip) | conf=%.0f%% threshold=%d | %s",
-                                cycle_id, ticker, confidence, dyn_threshold, obs.get("brain_reason", "")[:60])
+                # C. Use dynamic threshold + A. Adaptive time window multiplier
+                # time_mult < 1.0 (lunch) → effectively raises threshold (harder to pass)
+                # time_mult > 1.0 (opening) → lowers effective threshold (easier to pass)
+                effective_conf = confidence * time_mult * event_mult
+                if signal not in ("BUY", "SELL") or effective_conf <= dyn_threshold:
+                    logger.info("[TradingLoop][%s] %s -> HOLD (exec skip) | conf=%.0f%% eff=%.0f%% thr=%d | %s",
+                                cycle_id, ticker, confidence, effective_conf, dyn_threshold, obs.get("brain_reason", "")[:60])
                     continue
 
-                qty       = risk_profile.get("quantity", 1) or 1
+                # PropSafe check before entry
+                prop_size_mult = 1.0
+                if prop_safe and prop_safe._enabled:
+                    with _lock:
+                        dpnl_now  = _state.get("daily_pnl", 0.0)
+                        cap_now   = _state.get("current_capital", prefs.allocated_capital)
+                        peak_cap  = _state.get("peak_capital", cap_now)
+                    ps_ok, ps_reason, prop_size_mult = prop_safe.check_entry(
+                        daily_pnl=dpnl_now, capital=cap_now, peak_capital=peak_cap,
+                    )
+                    if not ps_ok:
+                        logger.warning("[TradingLoop][%s] %s BLOCKED by PropSafe: %s", cycle_id, ticker, ps_reason)
+                        continue
+                    if prop_size_mult < 1.0:
+                        logger.info("[TradingLoop][%s] %s PropSafe WARNING — size reduced to %.0f%%",
+                                    cycle_id, ticker, prop_size_mult * 100)
+
+                qty       = max(lot_size, int((risk_profile.get("quantity", 1) or 1) * prop_size_mult)) or 1
                 sl_price  = obs.get("sl_price") or (live_price * 0.985)
                 tp_price  = obs.get("tp_price") or (live_price * 1.03)
                 risk_inr  = risk_profile.get("final_risk_inr",
@@ -764,7 +838,7 @@ class TradingLoop:
 
             elapsed_ms = (time.perf_counter() - t_start) * 1000
             self._update_state("last_cycle_status",
-                               f"ok:{last_signal}:{last_conf:.0f}% ({len(watchlist)} tickers, {len(final_open)} open, thr={dyn_threshold})")
+                               f"ok:{last_signal}:{last_conf:.0f}% ({len(watchlist)} tickers, {len(final_open)} open, thr={dyn_threshold}, tw={time_mult:.1f}x)")
             self._update_state("last_cycle_time",
                                datetime.now(timezone.utc).isoformat())
             self._update_state("next_cycle_time",

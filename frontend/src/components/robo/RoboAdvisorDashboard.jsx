@@ -29,6 +29,8 @@ import TargetCapitalSettings    from './TargetCapitalSettings';
 import AgentDiscussionPanel     from './AgentDiscussionPanel';
 import WatchlistParallelPanel   from './WatchlistParallelPanel';
 import { LiveTickInline }       from '../LiveTickBadge';
+import PropSafePanel            from '../PropSafePanel';
+import PositionSizerPanel       from '../PositionSizerPanel';
 
 const API = `${process.env.REACT_APP_BACKEND_URL}/api`;
 const fmt    = (v, d = 0) => v == null ? '—' : Number(v).toLocaleString('en-IN', { minimumFractionDigits: d, maximumFractionDigits: d });
@@ -1621,6 +1623,12 @@ export default function RoboAdvisorDashboard({ selectedStock, onSelectStock }) {
         {/* ── Trade Explainability Log ──────────────────────────────────── */}
         <div className="bg-zinc-900/60 border border-zinc-800/50 rounded-2xl p-4">
           <TradeExplainability orders={orders} orderStats={orderStats} />
+        </div>
+
+        {/* ── PropSafe + Position Sizer Row ─────────────────────────────── */}
+        <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
+          <PropSafePanel />
+          <PositionSizerPanel />
         </div>
 
         {/* ── Hybrid Super Brain ────────────────────────────────────────── */}
