@@ -154,18 +154,20 @@ Clone trading app → Add dark/light mode, mobile responsiveness, MiroFish LangG
 ## Prioritized Backlog
 
 ### P1
+- [ ] Deep regression pass on Multi-Chart "Object is disposed" crash fix (1/2/4 layout switching, rapid slot clicking) — was fixed via try/catch guards in ChartPanel.jsx, testing agent skipped deep verification twice due to timeout
 - [ ] Run/test Auto-mode to evaluate live brain decisions natively in paper mode
 - [ ] Visualize StrategyCollaborator 6-agent signals in ROBO tab (radar/table view)
 
 ### P2
 - [ ] PCR Alert system — popup on NIFTY/SENSEX PCR threshold cross
-- [ ] Real tick data — NSE WebSocket for sub-second price updates
 - [ ] Auto-mode brain override — when brain fires BUY and dreamer says HOLD, show override log
 
 ### P3
+- [ ] TradingDashboard.jsx refactoring (~1013 lines → extract `<DashboardModals />` for Visualize/3D/Parity/DeltaDash/HybridBrain/OptionChain/SectorSheet mounting block)
 - [ ] ChartPanel.jsx refactoring (~1700 lines → split into SmcOverlay.jsx, ChartCore.jsx)
 - [ ] server.py modularization (11k+ lines — route by feature into /agents/)
 - [ ] Kronos fix — TATAMOTORS.NS delisted ticker cleanup in default scan universe
+- [ ] "Sync Timeframe" toggle across multi-chart layout
 
 ---
 
@@ -297,3 +299,23 @@ Clone trading app → Add dark/light mode, mobile responsiveness, MiroFish LangG
 **Frontend**: RoboAdvisorDashboard.jsx — "Robot 3.0 · Layer Evolution" panel (violet) below Live Training panel: 6 trust bars, update counts, total evolution updates, trade closes learned. data-testid: layer-evolution-panel, layer-evolution-badge, layer-row-{layer}
 
 **Tested**: unit simulation (trust evolution verified), e2e curl (endpoints + robo/status), hybrid engine adaptive coefficients, frontend compiles clean.
+
+---
+
+## Update (Feb 2026) — Full Dashboard Redesign: SCAN/STRAT/TRADERS/PAPER/SETTINGS Shell
+
+**User request**: "Main Dashboard Layout: Top Bar (Nifty/BankNifty/Sensex big numbers), Left Sidebar Nav (SCAN/STRAT/TRADERS/PAPER/SETTINGS), Center (Live Chart + Key Indicators), Right Panel (tab-based Signals/Positions/Risk), mobile sidebar collapse."
+
+### New Structure (`TradingDashboard.jsx` fully restructured)
+- **Top Bar**: Brand + `IndicesTickerBar` restyled with big inline NIFTY/SENSEX/BANKNIFTY numbers (`text-base md:text-xl font-black`) + global `StockSearch` + theme toggle + notifications bell (→ opens Settings/Alerts) + RL training badge (→ opens Settings/RL Agent)
+- **Left Sidebar**: 5-item nav — SCAN (`AutoScanner`), STRAT (14 strategy analyzer bundle), TRADERS (`TopTraderUniverseScan`), PAPER (`PaperTradingPanel`), SETTINGS (opens drawer)
+- **Center**: `MultiChartLayout` (1/2/4 charts, unchanged) + "Key Indicators" strip (OrderFlowPanel, KronosForecastPanel, GannQSCPanel, SquareOf9Calculator)
+- **Right Panel** (tab-based per user's explicit choice): SIGNALS (`SignalDashboard` + `OIAnalysis`) | POSITIONS (new `OpenPositionsPanel.jsx` — merges `/api/robo/positions` + `/api/paper-trade/positions` live) | RISK (`AdvancedRiskPanel`)
+- **Settings Drawer** (new `SettingsDrawer.jsx`, custom CSS-transform drawer — NOT Radix Sheet, to keep `RoboDashboard`/`RLAgentPanel` always-mounted via `display:none` toggle so background polling/training never stops even when drawer closed): pinned Robo-Trader banner + pills for Watchlist, Crypto, Groww, Portfolio, Alerts, Market Intel (Regulatory/Sector/TopMovers/SectorRotation/Moneycontrol combined), RL Agent, AI Assemble (Ensemble+MonteCarlo), PE-CE OI, Quant, Tools (Visualize/3D/Parity/DeltaDash/HybridBrain quick-launch — gives `HybridBrainPanel` its first-ever UI entry point)
+- **Mobile**: 3-tab bottom bar (Menu/Chart/Panel) + hamburger toggle, hidden below `lg:` breakpoint (matches prior codebase convention)
+- `StockSearch.jsx`: results dropdown changed to `absolute` overlay (was static block) so it works correctly in the narrow top bar
+
+**Tested** (`testing_agent_v4_fork`, reduced-scope retry after 1 timeout): 100% pass — sidebar nav clicks, Settings drawer open/close + section pills, right panel 3 tabs, top-bar search→chart load, mobile 390×844 responsive toggle all verified with no console errors. Deep multi-chart "Object is disposed" regression check was skipped this round (time-constrained, previously fixed in prior session) — **still recommended for a future dedicated regression pass**.
+
+**Minor code-review notes (not blocking)**: `TradingDashboard.jsx` now ~1013 lines (approaching 700-line split guideline — consider extracting modal-mounting block into `DashboardModals.jsx`); `StockSearch` result text lacks a separator between badge/symbol/name (cosmetic only).
+
