@@ -162,38 +162,66 @@ const GROWW_DAYS_MAP = {
   '1M':30,'6M':180,'1Y':365,
 };
 
+// Crypto TF label → days map (same as TradingDashboard.jsx)
+const CRYPTO_DAYS_MAP = {
+  '1MIN':1,'2M':1,'3M':1,'5M':1,'10M':1,'15M':1,'30M':1,'45M':1,
+  '1H':1,'2H':1,'4H':1,
+  '1D':7,'1W':30,
+  '1MO':30,'3MO':90,'6MO':180,'1Y':365,
+  '1M':30,'6M':180,
+};
+
 function ChartSlot({ slot, onUpdate, isCompact, onOpenOptionChain }) {
+  const isCrypto = slot.selectedStock?.type === 'CRYPTO';
+
   const fetchData = useCallback(async (ticker, tf, dsOverride) => {
-    const ds = dsOverride !== undefined ? dsOverride : slot.dataSource;
     onUpdate(slot.id, { loading: true });
     try {
       let data;
-      if (ds === 'groww') {
-        const sym = ticker.replace('.NS','').replace('.BO','').replace(/^\^/,'');
-        const interval  = GROWW_INTV_MAP[tf.label] || '1d';
-        const days_back = GROWW_DAYS_MAP[tf.label] || 120;
-        try {
-          const res = await axios.get(`${API}/groww/candles/${sym}`, {
-            params: { interval, days_back }
-          });
-          data = { ticker, bars: res.data.bars || [] };
-        } catch {
+
+      // ── Crypto: use CoinPaprika/Kraken chart endpoint ──────────
+      const stock = slot.selectedStock;
+      if (stock?.type === 'CRYPTO') {
+        const coinId = stock.coin_id || ticker.toLowerCase().replace('-usd','').replace('usd','');
+        const days = CRYPTO_DAYS_MAP[tf?.label] || 7;
+        const res = await axios.get(`${API}/crypto/chart/${coinId}?days=${days}`);
+        const bars = (res.data.bars || []).map(b => ({
+          timestamp: b.timestamp, open: b.open, high: b.high,
+          low: b.low, close: b.close, volume: 0,
+        }));
+        data = { ticker: coinId.toUpperCase(), bars };
+      } else {
+        // ── Indian stocks: Groww or Yahoo ──────────────────────
+        const ds = dsOverride !== undefined ? dsOverride : slot.dataSource;
+        if (ds === 'groww') {
+          const sym = ticker.replace('.NS','').replace('.BO','').replace(/^\^/,'');
+          const interval  = GROWW_INTV_MAP[tf.label] || '1d';
+          const days_back = GROWW_DAYS_MAP[tf.label] || 120;
+          try {
+            const res = await axios.get(`${API}/groww/candles/${sym}`, {
+              params: { interval, days_back }
+            });
+            data = { ticker, bars: res.data.bars || [] };
+          } catch {
+            const res = await axios.get(`${API}/stock/bars/${ticker}`, {
+              params: { timespan: tf.timespan, multiplier: tf.multiplier, limit: 200 }
+            });
+            data = res.data;
+          }
+        } else {
           const res = await axios.get(`${API}/stock/bars/${ticker}`, {
-            params: { timespan: tf.timespan, multiplier: tf.multiplier, limit: 200 }
+            params: { timespan: tf.timespan, multiplier: tf.multiplier, ...(tf.days ? { days: tf.days } : {}), limit: 200 }
           });
           data = res.data;
         }
-      } else {
-        const res = await axios.get(`${API}/stock/bars/${ticker}`, {
-          params: { timespan: tf.timespan, multiplier: tf.multiplier, ...(tf.days ? { days: tf.days } : {}), limit: 200 }
-        });
-        data = res.data;
       }
+
       onUpdate(slot.id, { stockData: data, loading: false, timeframe: tf, lastFetched: Date.now() });
     } catch (err) {
       onUpdate(slot.id, { loading: false });
     }
-  }, [slot.id, slot.dataSource, onUpdate]);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [slot.id, slot.dataSource, slot.selectedStock, onUpdate]);
 
   const handleStockSelect = useCallback((stock) => {
     onUpdate(slot.id, { selectedStock: stock, stockData: null });
@@ -294,9 +322,9 @@ function ChartSlot({ slot, onUpdate, isCompact, onOpenOptionChain }) {
             setSemiLogScale={handleSemiLog}
             timeframe={slot.timeframe}
             onTimeframeChange={handleTfChange}
-            isCrypto={false}
+            isCrypto={isCrypto}
             dataSource={slot.dataSource}
-            onDataSourceChange={handleDsChange}
+            onDataSourceChange={isCrypto ? undefined : handleDsChange}
             activeStrategy={slot.activeStrategy}
             strategyData={slot.strategyData}
             tradeSignal={null}
