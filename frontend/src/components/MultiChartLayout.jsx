@@ -437,7 +437,6 @@ export default function MultiChartLayout({
     <div className="flex flex-col h-full min-h-0">
       {/* Layout switcher toolbar */}
       <div className="shrink-0 flex items-center gap-1.5 px-2 py-1 bg-white dark:bg-zinc-950 border-b border-slate-200 dark:border-zinc-800/60">
-        <span className="text-[10px] text-slate-500 dark:text-zinc-600 font-semibold uppercase tracking-wide mr-1">Layout</span>
         {[
           { n: 1, Icon: Icon1, label: '1 Chart'  },
           { n: 2, Icon: Icon2, label: '2 Charts' },
@@ -457,9 +456,6 @@ export default function MultiChartLayout({
             <span>{label}</span>
           </button>
         ))}
-        <div className="ml-auto text-[10px] text-slate-400 dark:text-zinc-600">
-          {visibleCount > 1 && `${visibleCount} independent charts`}
-        </div>
       </div>
 
       {/* Charts grid */}
