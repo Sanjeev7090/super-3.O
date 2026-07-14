@@ -302,16 +302,22 @@ Clone trading app → Add dark/light mode, mobile responsiveness, MiroFish LangG
 
 ---
 
-## Update (Feb 2026) — Black-Scholes Option Calculator
+## Update (Feb 2026) — Black-Scholes Option Calculator + IV Solver
 
-**New Component**: `BlackScholesPanel.jsx` + `/api/black-scholes/calculate` endpoint
+**New Component**: `BlackScholesPanel.jsx` + `/api/black-scholes/calculate` + `/api/black-scholes/iv-solver`
 
 - European Call + Put pricing with full Greeks (Delta, Gamma, Vega, Theta, Rho)
 - d1, d2, T(years) intermediate values shown
 - Quick presets: NIFTY ATM, BANKNIFTY, RELIANCE, INFY
 - Dividend yield support
+- **IV Solver**: Newton-Raphson method — input market price → get Implied Volatility (with bisection fallback)
 - Accessible via Settings Drawer → B-S CALC tab
 - Backend uses scipy.stats.norm (already in requirements.txt)
+
+**Dark Mode Bug Fix**: ChartPanel.jsx TF selector button was showing white (bg-slate-100 + dark:bg-white/8 unreliable)
+- Fixed: `dark:bg-zinc-800` (inactive), `dark:bg-zinc-600` (active/open)
+- Yahoo data source button: `dark:bg-white` → `dark:bg-zinc-600 dark:text-white`
+- Testing: 10/10 pytest + 6/6 frontend verified (iteration_27.json)
 
 ---
 
