@@ -1761,8 +1761,8 @@ const ChartPanel = ({
               }}
               className={`px-2.5 py-1 text-[11px] font-mono font-bold uppercase tracking-wider flex items-center gap-1.5 transition-all border shrink-0 ${
                 tfOpen
-                  ? 'bg-slate-900 dark:bg-white/15 text-white border-white/30'
-                  : 'bg-slate-900 dark:bg-white/8 text-white dark:text-zinc-100 border-white/15 hover:bg-slate-700 dark:hover:bg-white/15'
+                  ? 'bg-slate-700 dark:bg-white/15 text-white border-slate-500 dark:border-white/30'
+                  : 'bg-slate-100 dark:bg-white/8 text-slate-800 dark:text-zinc-100 border-slate-300 dark:border-white/15 hover:bg-slate-200 dark:hover:bg-white/15'
               }`}
               data-testid="tf-trigger"
             >
@@ -1966,7 +1966,7 @@ const ChartPanel = ({
                 <button
                   onClick={() => onDataSourceChange('yahoo')}
                   className={`px-1.5 py-0.5 text-[9px] font-bold uppercase tracking-wider transition-all ${
-                    dataSource === 'yahoo' ? 'bg-slate-900 dark:bg-white text-white dark:text-black' : 'text-slate-400 dark:text-zinc-500 hover:text-slate-800 dark:hover:text-white'
+                    dataSource === 'yahoo' ? 'bg-slate-700 dark:bg-white text-white dark:text-black' : 'text-slate-400 dark:text-zinc-500 hover:text-slate-800 dark:hover:text-white'
                   }`}
                   data-testid="src-yahoo"
                   title="Yahoo Finance"
