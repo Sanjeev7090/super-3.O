@@ -302,6 +302,19 @@ Clone trading app → Add dark/light mode, mobile responsiveness, MiroFish LangG
 
 ---
 
+## Update (Feb 2026) — Black-Scholes Option Calculator
+
+**New Component**: `BlackScholesPanel.jsx` + `/api/black-scholes/calculate` endpoint
+
+- European Call + Put pricing with full Greeks (Delta, Gamma, Vega, Theta, Rho)
+- d1, d2, T(years) intermediate values shown
+- Quick presets: NIFTY ATM, BANKNIFTY, RELIANCE, INFY
+- Dividend yield support
+- Accessible via Settings Drawer → B-S CALC tab
+- Backend uses scipy.stats.norm (already in requirements.txt)
+
+---
+
 ## Update (Feb 2026) — TimeframeLevels Custom Badge Overlay + MTF Direction Indicators
 
 ### TimeframeLevels.jsx — Complete Redesign

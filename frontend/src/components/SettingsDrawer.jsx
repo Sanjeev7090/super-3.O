@@ -19,6 +19,7 @@ import AdvancedRiskPanel from './AdvancedRiskPanel';
 import SentimentPanel from './SentimentPanel';
 import ObservabilityPanel from './ObservabilityPanel';
 import { X, Robot, MagicWand } from '@phosphor-icons/react';
+import BlackScholesPanel from './BlackScholesPanel';
 
 // ── Quant sub-panel (Portfolio Optimizer / Risk / Sentiment / Observability) ──
 function QuantPanel({ selectedStock }) {
@@ -65,6 +66,7 @@ const SECTIONS = [
   { id: 'pece', label: 'PE-CE OI' },
   { id: 'quant', label: 'Quant' },
   { id: 'tools', label: 'Tools' },
+  { id: 'bscalc', label: 'B-S Calc' },
 ];
 
 /**
@@ -205,6 +207,16 @@ const SettingsDrawer = ({
                   <p className="text-[9px] text-zinc-500 mt-0.5">{t.desc}</p>
                 </button>
               ))}
+            </div>
+          )}
+
+          {section === 'bscalc' && (
+            <div>
+              <div className="px-4 pt-4 pb-2 border-b border-white/10">
+                <p className="text-[10px] font-black uppercase tracking-widest text-amber-400">Black-Scholes Calculator</p>
+                <p className="text-[9px] text-zinc-500 mt-0.5">European Option Pricing · Greeks · Put-Call Parity</p>
+              </div>
+              <BlackScholesPanel />
             </div>
           )}
         </div>

@@ -13273,3 +13273,69 @@ async def _get_upcoming_events(days_ahead: int = 7):
         return {"events": [], "event_score_multiplier": 1.0, "error": str(e)}
 
 app.include_router(_features_router)
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Black-Scholes Option Calculator
+# ─────────────────────────────────────────────────────────────────────────────
+from scipy.stats import norm as _scipy_norm
+
+class BSCalcRequest(BaseModel):
+    S: float          # Spot Price
+    K: float          # Strike Price
+    T_days: float     # Days to expiry
+    r: float          # Risk-free rate (e.g. 0.065)
+    sigma: float      # Volatility / IV (e.g. 0.20)
+    dividend_yield: float = 0.0
+
+_bs_router = APIRouter(prefix="/api/black-scholes")
+
+@_bs_router.post("/calculate")
+async def bs_calculate(req: BSCalcRequest):
+    try:
+        S, K, r, sigma, q = req.S, req.K, req.r, req.sigma, req.dividend_yield
+        T = req.T_days / 365.0
+
+        if T <= 0:
+            call_price = round(max(S - K, 0), 2)
+            put_price  = round(max(K - S, 0), 2)
+            return {
+                "call_price": call_price,
+                "put_price":  put_price,
+                "greeks": {"Delta": 1.0 if S > K else 0.0, "Gamma": 0.0, "Vega": 0.0, "Theta": 0.0},
+                "d1": None, "d2": None, "T_years": T,
+            }
+
+        d1 = (np.log(S / K) + (r - q + 0.5 * sigma ** 2) * T) / (sigma * np.sqrt(T))
+        d2 = d1 - sigma * np.sqrt(T)
+
+        call_price = round(S * np.exp(-q * T) * _scipy_norm.cdf(d1) - K * np.exp(-r * T) * _scipy_norm.cdf(d2), 2)
+        put_price  = round(K * np.exp(-r * T) * _scipy_norm.cdf(-d2) - S * np.exp(-q * T) * _scipy_norm.cdf(-d1), 2)
+
+        delta_call = round(np.exp(-q * T) * _scipy_norm.cdf(d1), 4)
+        delta_put  = round(-np.exp(-q * T) * _scipy_norm.cdf(-d1), 4)
+        gamma      = round(np.exp(-q * T) * _scipy_norm.pdf(d1) / (S * sigma * np.sqrt(T)), 6)
+        vega       = round(S * np.exp(-q * T) * _scipy_norm.pdf(d1) * np.sqrt(T) / 100, 4)
+        theta_call = round((-S * np.exp(-q * T) * _scipy_norm.pdf(d1) * sigma / (2 * np.sqrt(T))
+                           - r * K * np.exp(-r * T) * _scipy_norm.cdf(d2)
+                           + q * S * np.exp(-q * T) * _scipy_norm.cdf(d1)) / 365, 4)
+        theta_put  = round((-S * np.exp(-q * T) * _scipy_norm.pdf(d1) * sigma / (2 * np.sqrt(T))
+                           + r * K * np.exp(-r * T) * _scipy_norm.cdf(-d2)
+                           - q * S * np.exp(-q * T) * _scipy_norm.cdf(-d1)) / 365, 4)
+        rho_call   = round(K * T * np.exp(-r * T) * _scipy_norm.cdf(d2) / 100, 4)
+        rho_put    = round(-K * T * np.exp(-r * T) * _scipy_norm.cdf(-d2) / 100, 4)
+
+        return {
+            "call_price": call_price,
+            "put_price":  put_price,
+            "d1": round(d1, 4),
+            "d2": round(d2, 4),
+            "T_years": round(T, 6),
+            "greeks": {
+                "call": {"Delta": delta_call, "Gamma": gamma, "Vega": vega, "Theta": theta_call, "Rho": rho_call},
+                "put":  {"Delta": delta_put,  "Gamma": gamma, "Vega": vega, "Theta": theta_put,  "Rho": rho_put},
+            },
+        }
+    except Exception as e:
+        raise HTTPException(status_code=400, detail=str(e))
+
+app.include_router(_bs_router)
