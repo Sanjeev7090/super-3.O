@@ -6,6 +6,7 @@ import {
   TrendingUp, TrendingDown, Minus, Target, ShieldAlert, ArrowRight,
   ChevronDown, ChevronUp,
 } from 'lucide-react';
+import { useTheme } from '../context/ThemeContext';
 
 const BACKEND_URL = process.env.REACT_APP_BACKEND_URL;
 const API = `${BACKEND_URL}/api`;
@@ -50,6 +51,8 @@ const KronosForecastPanel = ({ selectedStock, timeframe = '1D' }) => {
   const priceLinesRef  = useRef([]);
 
   const isMobile = useIsMobile();
+  const { theme } = useTheme();
+  const isDark = theme === 'dark';
 
   const [predLen, setPredLen]         = useState(30);
   const [loading, setLoading]         = useState(false);
@@ -94,6 +97,25 @@ const KronosForecastPanel = ({ selectedStock, timeframe = '1D' }) => {
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [selectedStock?.ticker]);
 
+  // ── Update chart colors on theme change ────────────────────────────────────
+  useEffect(() => {
+    if (!chartRef.current) return;
+    try {
+      chartRef.current.applyOptions({
+        layout: {
+          background: { type: 'solid', color: isDark ? '#0A0A0A' : '#FFFFFF' },
+          textColor:  isDark ? '#A1A1AA' : '#64748B',
+        },
+        grid: {
+          vertLines: { color: isDark ? 'rgba(255,255,255,0.04)' : 'rgba(0,0,0,0.05)' },
+          horzLines: { color: isDark ? 'rgba(255,255,255,0.04)' : 'rgba(0,0,0,0.05)' },
+        },
+        rightPriceScale: { borderColor: isDark ? 'rgba(255,255,255,0.1)' : 'rgba(0,0,0,0.1)' },
+        timeScale:        { borderColor: isDark ? 'rgba(255,255,255,0.1)' : 'rgba(0,0,0,0.1)' },
+      });
+    } catch (_) {}
+  }, [isDark]);
+
   // ── Chart init ──────────────────────────────────────────────────────────────
   useEffect(() => {
     if (!containerRef.current || chartRef.current) return;
@@ -104,18 +126,18 @@ const KronosForecastPanel = ({ selectedStock, timeframe = '1D' }) => {
       width:  containerRef.current.clientWidth,
       height: chartHeight,
       layout: {
-        background:  { type: 'solid', color: '#0A0A0A' },
-        textColor:   '#A1A1AA',
+        background:  { type: 'solid', color: isDark ? '#0A0A0A' : '#FFFFFF' },
+        textColor:   isDark ? '#A1A1AA' : '#64748B',
         fontFamily:  "'JetBrains Mono', monospace",
         fontSize:    isMobile ? 10 : 11,
       },
       localization: { locale: 'en-US', dateFormat: 'yyyy-MM-dd' },
       grid: {
-        vertLines: { color: 'rgba(255,255,255,0.04)' },
-        horzLines: { color: 'rgba(255,255,255,0.04)' },
+        vertLines: { color: isDark ? 'rgba(255,255,255,0.04)' : 'rgba(0,0,0,0.05)' },
+        horzLines: { color: isDark ? 'rgba(255,255,255,0.04)' : 'rgba(0,0,0,0.05)' },
       },
       rightPriceScale: {
-        borderColor: 'rgba(255,255,255,0.1)',
+        borderColor: isDark ? 'rgba(255,255,255,0.1)' : 'rgba(0,0,0,0.1)',
         scaleMargins: { top: 0.05, bottom: 0.05 },
       },
       leftPriceScale:  { visible: false },
@@ -297,10 +319,10 @@ const KronosForecastPanel = ({ selectedStock, timeframe = '1D' }) => {
     : 'NOT LOADED';
 
   return (
-    <div className="border-t border-white/10 bg-[#0A0A0A] flex flex-col" data-testid="kronos-forecast-panel">
+    <div className="border-t border-slate-200 dark:border-white/10 bg-white dark:bg-[#0A0A0A] flex flex-col" data-testid="kronos-forecast-panel">
 
       {/* ── Header ─────────────────────────────────────────────────────────── */}
-      <div className="px-3 sm:px-4 py-2 sm:py-0 sm:h-11 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2 sm:gap-0 border-b border-white/10 bg-[#0E0E10]">
+      <div className="px-3 sm:px-4 py-2 sm:py-0 sm:h-11 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2 sm:gap-0 border-b border-slate-200 dark:border-white/10 bg-slate-50 dark:bg-[#0E0E10]">
 
         {/* Left: brand + model status */}
         <div className="flex items-center justify-between sm:justify-start gap-2">
@@ -309,7 +331,7 @@ const KronosForecastPanel = ({ selectedStock, timeframe = '1D' }) => {
               <Sparkles className="w-3 h-3 sm:w-3.5 sm:h-3.5 text-[#A855F7]" />
             </div>
             <div className="flex items-baseline gap-1.5">
-              <span className="text-[11px] font-black uppercase tracking-[0.18em] text-white leading-none">
+              <span className="text-[11px] font-black uppercase tracking-[0.18em] text-slate-800 dark:text-white leading-none">
                 KRONOS
               </span>
               <span className="text-[9px] font-bold uppercase tracking-[0.18em] text-[#A855F7] leading-none hidden xs:inline">
@@ -320,7 +342,7 @@ const KronosForecastPanel = ({ selectedStock, timeframe = '1D' }) => {
               className={`text-[8px] font-mono uppercase tracking-wider px-1.5 py-0.5 rounded-sm hidden sm:inline ${
                 modelStatus.loaded
                   ? 'text-emerald-400 bg-emerald-400/10 border border-emerald-400/20'
-                  : 'text-zinc-500 bg-white/4 border border-white/8'
+                  : 'text-slate-500 dark:text-zinc-500 bg-black/5 dark:bg-white/4 border border-black/10 dark:border-white/8'
               }`}
             >
               {modelName}
@@ -330,7 +352,7 @@ const KronosForecastPanel = ({ selectedStock, timeframe = '1D' }) => {
           {/* Mobile: collapse toggle */}
           <button
             onClick={() => setCollapsed(c => !c)}
-            className="sm:hidden p-1 text-zinc-500 hover:text-white"
+            className="sm:hidden p-1 text-slate-500 dark:text-zinc-500 hover:text-slate-900 dark:hover:text-white"
             aria-label="Toggle"
           >
             {collapsed ? <ChevronDown className="w-4 h-4" /> : <ChevronUp className="w-4 h-4" />}
@@ -351,7 +373,7 @@ const KronosForecastPanel = ({ selectedStock, timeframe = '1D' }) => {
                 className={`w-7 h-6 text-[10px] font-mono font-bold border transition-colors ${
                   predLen === n
                     ? 'bg-[#A855F7] text-black border-[#A855F7]'
-                    : 'bg-transparent text-zinc-400 border-white/10 hover:border-white/30 hover:text-white'
+                    : 'bg-transparent text-slate-400 dark:text-zinc-400 border-slate-200 dark:border-white/10 hover:border-slate-400 dark:hover:border-white/30 hover:text-slate-900 dark:hover:text-white'
                 }`}
                 data-testid={`kronos-pred-${n}`}
               >
@@ -389,7 +411,7 @@ const KronosForecastPanel = ({ selectedStock, timeframe = '1D' }) => {
 
         {/* Stats strip */}
         {stats && (
-          <div className="px-3 sm:px-4 py-2 border-b border-white/10 grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-x-3 gap-y-2 bg-[#0B0B0D]">
+          <div className="px-3 sm:px-4 py-2 border-b border-slate-200 dark:border-white/10 grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-x-3 gap-y-2 bg-slate-50 dark:bg-[#0B0B0D]">
             <Stat label="Last Close"     value={stats.last_close.toFixed(2)} />
             <Stat label="Forecast Close" value={stats.final_close.toFixed(2)} />
             <Stat label="Pred High"      value={stats.max_high.toFixed(2)} color="#00E676" />
@@ -431,7 +453,7 @@ const KronosForecastPanel = ({ selectedStock, timeframe = '1D' }) => {
         {!forecast && !loading && (
           <div className="flex flex-col items-center justify-center py-8 sm:py-10 px-4 text-center">
             <Sparkles className="w-7 h-7 sm:w-8 sm:h-8 text-[#A855F7] mb-2" />
-            <p className="text-[12px] font-bold uppercase tracking-wider text-white">
+            <p className="text-[12px] font-bold uppercase tracking-wider text-slate-800 dark:text-white">
               Kronos K-Line Forecast
             </p>
             <p className="text-[11px] text-zinc-500 mt-1 max-w-xs sm:max-w-md">
@@ -463,8 +485,8 @@ const KronosForecastPanel = ({ selectedStock, timeframe = '1D' }) => {
 
         {/* Footer legend */}
         {forecast && (
-          <div className="px-3 sm:px-4 py-1.5 sm:h-7 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-1 sm:gap-0 border-t border-white/10 bg-[#0B0B0D]">
-            <div className="flex items-center gap-3 text-[8px] sm:text-[9px] font-mono uppercase tracking-wider text-zinc-500 flex-wrap">
+          <div className="px-3 sm:px-4 py-1.5 sm:h-7 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-1 sm:gap-0 border-t border-slate-200 dark:border-white/10 bg-slate-50 dark:bg-[#0B0B0D]">
+            <div className="flex items-center gap-3 text-[8px] sm:text-[9px] font-mono uppercase tracking-wider text-slate-500 dark:text-zinc-500 flex-wrap">
               <span className="flex items-center gap-1">
                 <span className="w-2 h-2 bg-[#00E676] inline-block" /> History
               </span>
@@ -474,7 +496,7 @@ const KronosForecastPanel = ({ selectedStock, timeframe = '1D' }) => {
               <span className="flex items-center gap-1">
                 <span className="w-2 h-2 bg-[#F5A623] inline-block" /> Bear
               </span>
-              <span className="text-zinc-600 hidden sm:inline">
+              <span className="text-zinc-600 dark:text-zinc-600 hidden sm:inline">
                 Pred {forecast.pred_len} • T 1.0
               </span>
             </div>
@@ -492,7 +514,7 @@ const KronosForecastPanel = ({ selectedStock, timeframe = '1D' }) => {
 
 const Stat = ({ label, value, color, badge, badgeColor }) => (
   <div className="flex flex-col min-w-0">
-    <span className="text-[8px] font-bold uppercase tracking-[0.18em] text-zinc-500 truncate">{label}</span>
+    <span className="text-[8px] font-bold uppercase tracking-[0.18em] text-slate-500 dark:text-zinc-500 truncate">{label}</span>
     <div className="flex items-baseline gap-1.5 mt-0.5 flex-wrap">
       <span className="text-sm font-mono font-bold leading-none truncate" style={{ color: color || '#FFFFFF' }}>
         {value}
@@ -543,11 +565,11 @@ const SignalRow = ({ signal, isMobile }) => {
         {/* Risk-Reward — compact on mobile */}
         <div className="flex items-center justify-end gap-3 sm:gap-4 px-3 sm:px-4 flex-1 border-l border-white/10">
           <div className="flex flex-col leading-none text-right sm:text-left">
-            <span className="text-[7px] sm:text-[8px] font-bold uppercase tracking-[0.18em] text-zinc-500">R:R</span>
-            <span className="text-xs sm:text-sm font-mono font-bold text-white">1:{signal.risk_reward}</span>
+            <span className="text-[7px] sm:text-[8px] font-bold uppercase tracking-[0.18em] text-slate-500 dark:text-zinc-500">R:R</span>
+            <span className="text-xs sm:text-sm font-mono font-bold text-slate-800 dark:text-white">1:{signal.risk_reward}</span>
           </div>
           <div className="flex flex-col leading-none text-right">
-            <span className="text-[7px] sm:text-[8px] font-bold uppercase tracking-[0.18em] text-zinc-500">Expected</span>
+            <span className="text-[7px] sm:text-[8px] font-bold uppercase tracking-[0.18em] text-slate-500 dark:text-zinc-500">Expected</span>
             <span
               className="text-xs sm:text-sm font-mono font-bold"
               style={{ color: signal.expected_move_pct >= 0 ? '#00E676' : '#FF3B30' }}
@@ -559,7 +581,7 @@ const SignalRow = ({ signal, isMobile }) => {
       </div>
 
       {/* Levels grid — 3 cols on mobile, 6 on desktop */}
-      <div className="grid grid-cols-3 sm:grid-cols-6 border-t border-white/5">
+      <div className="grid grid-cols-3 sm:grid-cols-6 border-t border-slate-200/60 dark:border-white/5">
         <Cell label="Entry"      value={signal.entry}          color="#FFFFFF"  icon={ArrowRight} />
         <Cell label="Stop Loss"  value={signal.stop_loss}      color="#FF3B30"  icon={ShieldAlert} />
         <Cell label="Day Target" value={signal.day_target}     color="#F5A623"  icon={Target} shade />
@@ -572,14 +594,14 @@ const SignalRow = ({ signal, isMobile }) => {
 };
 
 const Cell = ({ label, value, color, icon: I, shade }) => (
-  <div className={`flex flex-col px-2 sm:px-3 py-2 border-r border-white/5 last:border-r-0 ${shade ? 'bg-[#0E0E10]' : ''}`}>
-    <div className="flex items-center gap-0.5 text-[7px] sm:text-[8px] font-bold uppercase tracking-[0.18em] text-zinc-500">
+  <div className={`flex flex-col px-2 sm:px-3 py-2 border-r border-slate-200/60 dark:border-white/5 last:border-r-0 ${shade ? 'bg-slate-100 dark:bg-[#0E0E10]' : ''}`}>
+    <div className="flex items-center gap-0.5 text-[7px] sm:text-[8px] font-bold uppercase tracking-[0.18em] text-slate-500 dark:text-zinc-500">
       {I && <I className="w-2.5 h-2.5 shrink-0" />}
       <span className="truncate">{label}</span>
     </div>
     <span
-      className="text-[11px] sm:text-sm font-mono font-bold mt-0.5 truncate"
-      style={{ color: color || '#FFFFFF' }}
+      className="text-[11px] sm:text-sm font-mono font-bold mt-0.5 truncate text-slate-800 dark:text-white"
+      style={color && color !== '#FFFFFF' ? { color } : undefined}
     >
       {typeof value === 'number' ? value.toFixed(2) : (value ?? '—')}
     </span>
