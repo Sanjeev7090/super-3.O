@@ -791,6 +791,21 @@ const ChartPanel = ({
   const trendLineSeriesRef = useRef([]);
   const [trendlinesActive, setTrendlinesActive] = useState(false);
   const [trendlineCount, setTrendlineCount] = useState(0);
+  // Trendline type filter (all enabled by default)
+  const TREND_TYPES = [
+    { id: 'uptrend',      label: 'Uptrend',    color: '#00E676' },
+    { id: 'downtrend',    label: 'Downtrend',  color: '#FF4757' },
+    { id: 'h_support',    label: 'H-Support',  color: '#3B82F6' },
+    { id: 'h_resistance', label: 'H-Resist.',  color: '#FF6B00' },
+    { id: 'channel_up',   label: 'Ch. High',   color: '#06B6D4' },
+    { id: 'channel_down', label: 'Ch. Low',    color: '#EC4899' },
+    { id: 'fibonacci',    label: 'Fibonacci',  color: '#818CF8' },
+  ];
+  const [trendFilter, setTrendFilter] = useState(() => new Set(TREND_TYPES.map(t => t.id)));
+  const [trendFilterOpen, setTrendFilterOpen] = useState(false);
+  const trendFilterBtnRef = useRef(null);
+  const trendFilterDropdownRef = useRef(null);
+  const [trendFilterPos, setTrendFilterPos] = useState({ top: 0, left: 0 });
 
   const clearTrendLines = () => {
     if (chartRef.current && trendLineSeriesRef.current.length > 0) {
@@ -1710,14 +1725,15 @@ const ChartPanel = ({
     } catch (e) { /* series may be disposed */ }
   }, [emaActive]);
 
-  // ── Auto Trendlines — draw / clear on toggle or stock change ───
+  // ── Auto Trendlines — draw / clear on toggle, filter, or stock change ─
   useEffect(() => {
     clearTrendLines();
     if (!trendlinesActive || !chartRef.current || !stockData?.bars?.length) {
       setTrendlineCount(0);
       return;
     }
-    const lines = detectTrendlines(stockData.bars);
+    const allLines = detectTrendlines(stockData.bars);
+    const lines = allLines.filter(l => trendFilter.has(l.type));
     setTrendlineCount(lines.length);
     lines.forEach(line => {
       try {
@@ -1738,7 +1754,7 @@ const ChartPanel = ({
       } catch (e) {}
     });
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [stockData, trendlinesActive]);
+  }, [stockData, trendlinesActive, trendFilter]);
 
   // ── MTF Direction fetch — triggers when stock changes ─────────
   useEffect(() => {
@@ -1951,6 +1967,18 @@ const ChartPanel = ({
     return () => document.removeEventListener('click', handler);
   }, []);
 
+  // Trend filter dropdown: close on outside click
+  useEffect(() => {
+    const handler = (e) => {
+      if (
+        !(trendFilterBtnRef.current && trendFilterBtnRef.current.contains(e.target)) &&
+        !(trendFilterDropdownRef.current && trendFilterDropdownRef.current.contains(e.target))
+      ) setTrendFilterOpen(false);
+    };
+    document.addEventListener('click', handler);
+    return () => document.removeEventListener('click', handler);
+  }, []);
+
   useEffect(() => {
     const t = setTimeout(() => {
       if (chartRef.current && chartContainerRef.current) {
@@ -2077,19 +2105,95 @@ const ChartPanel = ({
           >
             PATTERNS
           </button>
-          {/* Auto Trendlines — one-click detect all trendline types */}
-          <button
-            onClick={() => setTrendlinesActive(v => !v)}
-            className={`px-2 py-1 text-[10px] font-bold uppercase tracking-wider transition-all whitespace-nowrap shrink-0 border ${
-              trendlinesActive
-                ? 'text-[#00BCD4] border-[#00BCD4]/40 bg-[#00BCD4]/10'
-                : 'text-zinc-500 border-transparent'
-            }`}
-            data-testid="trendlines-toggle"
-            title="Auto Trendlines — Uptrend, Downtrend, H-Support, H-Resistance, Channel, Fibonacci"
-          >
-            TREND{trendlinesActive && trendlineCount > 0 ? ` ·${trendlineCount}` : ''}
-          </button>
+          {/* Auto Trendlines — split button: toggle + type filter dropdown */}
+          <div className="flex items-stretch shrink-0 relative">
+            <button
+              onClick={() => setTrendlinesActive(v => !v)}
+              className={`px-2 py-1 text-[10px] font-bold uppercase tracking-wider transition-all whitespace-nowrap border ${
+                trendlinesActive
+                  ? 'text-[#06B6D4] border-[#06B6D4]/40 bg-[#06B6D4]/10'
+                  : 'text-zinc-500 border-transparent'
+              }`}
+              data-testid="trendlines-toggle"
+              title="Auto Trendlines — one click draws all trendline types"
+            >
+              TREND{trendlinesActive && trendlineCount > 0 ? ` ·${trendlineCount}` : ''}
+            </button>
+            <button
+              ref={trendFilterBtnRef}
+              onClick={() => {
+                if (!trendFilterOpen && trendFilterBtnRef.current) {
+                  const rect = trendFilterBtnRef.current.getBoundingClientRect();
+                  const dropW = 160;
+                  const left = Math.min(rect.left, window.innerWidth - dropW - 8);
+                  setTrendFilterPos({ top: rect.bottom + 4, left: Math.max(8, left) });
+                }
+                setTrendFilterOpen(o => !o);
+              }}
+              className={`px-1.5 py-1 text-[9px] font-bold uppercase tracking-wider transition-all whitespace-nowrap border border-l-0 flex items-center gap-0.5 ${
+                trendlinesActive && trendFilter.size < TREND_TYPES.length
+                  ? 'text-[#06B6D4] border-[#06B6D4]/40 bg-[#06B6D4]/10'
+                  : 'text-zinc-400 border-[#06B6D4]/30 bg-[#06B6D4]/4'
+              }`}
+              data-testid="trend-filter-btn"
+              title="Filter trendline types"
+            >
+              {trendFilter.size === TREND_TYPES.length ? 'ALL' : `${trendFilter.size}`}
+              <span className="text-[8px] leading-none">▾</span>
+            </button>
+            {trendFilterOpen && (
+              <div
+                ref={trendFilterDropdownRef}
+                className="bg-black/95 border border-[#06B6D4]/40 rounded shadow-2xl py-1"
+                style={{
+                  position: 'fixed',
+                  top: trendFilterPos.top,
+                  left: trendFilterPos.left,
+                  zIndex: 9999,
+                  minWidth: 160,
+                }}
+                data-testid="trend-filter-dropdown"
+              >
+                <div className="px-2 py-1 text-[8px] text-zinc-500 uppercase tracking-wider border-b border-white/5">
+                  Toggle types
+                </div>
+                {TREND_TYPES.map(t => {
+                  const on = trendFilter.has(t.id);
+                  return (
+                    <button
+                      key={t.id}
+                      onClick={() => {
+                        setTrendFilter(prev => {
+                          const next = new Set(prev);
+                          on ? next.delete(t.id) : next.add(t.id);
+                          return next;
+                        });
+                      }}
+                      className="w-full text-left px-3 py-1.5 text-[10px] font-bold uppercase tracking-wider transition-colors hover:bg-white/5 flex items-center gap-2"
+                      data-testid={`trend-type-${t.id}`}
+                    >
+                      <span className="w-3 h-0.5 rounded-full inline-block shrink-0" style={{ background: t.color }} />
+                      <span style={{ color: on ? t.color : '#52525b' }}>{t.label}</span>
+                      <span className="ml-auto text-[10px]">{on ? '✓' : ''}</span>
+                    </button>
+                  );
+                })}
+                <div className="border-t border-white/5 my-1" />
+                <div className="flex gap-1 px-2 pb-1">
+                  <button
+                    onClick={() => setTrendFilter(new Set(TREND_TYPES.map(t => t.id)))}
+                    className="flex-1 py-1 text-[9px] font-bold text-zinc-400 hover:text-white hover:bg-white/5 rounded transition-colors"
+                    data-testid="trend-filter-all"
+                  >All</button>
+                  <button
+                    onClick={() => setTrendFilter(new Set())}
+                    className="flex-1 py-1 text-[9px] font-bold text-red-400 hover:bg-red-500/10 rounded transition-colors"
+                    data-testid="trend-filter-clear"
+                  >Clear</button>
+                </div>
+              </div>
+            )}
+          </div>
           {/* Volume Profile toggle — POC, VAH, VAL auto-mark */}
           <button
             onClick={() => setVpEnabled(v => !v)}

@@ -317,7 +317,7 @@ Clone trading app → Add dark/light mode, mobile responsiveness, MiroFish LangG
 
 **Algorithm**: Adaptive pivot window (W = n/25), slope validation, broken-line check, touch-count scoring, max 3 lines per type (5 for Fib).
 
-**UI**: TREND button (cyan when active), shows count `TREND ·16`. Legend badge at bottom-left.
+**UI**: TREND + filter split button (SMC-style). Dropdown shows 7 type toggles with color swatches. "All" / "Clear" shortcuts. Count badge updates dynamically. Click-outside closes dropdown.
 
 **File**: ChartPanel.jsx — `detectTrendlines()` function added above component.
 
