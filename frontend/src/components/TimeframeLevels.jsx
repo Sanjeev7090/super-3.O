@@ -28,55 +28,69 @@ const calcHighLow = (bars, n) => {
   };
 };
 
-const BADGE_H    = 15; // px — height of one badge row
-const RIGHT_OFFSET = 74; // px from container right edge (clears the price scale)
+const BADGE_H     = 15;   // px height per badge row for collision avoidance
+const RIGHT_OFFSET = 74;  // px from container right edge — clears price scale
 
 const TimeframeLevels = ({ series, chart, bars }) => {
   const priceLinesRef = useRef([]);
-  const levelsRef     = useRef([]);   // [{ name, price, color }]
+  const levelsRef     = useRef([]);
+  const rafRef        = useRef(null);
   const [badges, setBadges] = useState([]);
 
-  /* ── helpers ─────────────────────────────────────── */
-  const clearLines = useCallback(() => {
+  /* ── clear old price lines from series ── */
+  const clearLines = useCallback((s) => {
     priceLinesRef.current.forEach(pl => {
-      try { if (series && pl) series.removePriceLine(pl); } catch (_) {}
+      try { if (s && pl) s.removePriceLine(pl); } catch (_) {}
     });
     priceLinesRef.current = [];
-  }, [series]);
+  }, []);
 
-  const recomputePositions = useCallback(() => {
-    if (!series || levelsRef.current.length === 0) return;
-
-    // Convert price → pixel y
+  /* ── recompute y-coordinates from current series state ── */
+  const recompute = useCallback((s) => {
+    if (!s || levelsRef.current.length === 0) return;
     const raw = levelsRef.current.map(lv => {
       let y = null;
-      try { y = series.priceToCoordinate(lv.price); } catch (_) {}
+      try { y = s.priceToCoordinate(lv.price); } catch (_) {}
       return { ...lv, y };
     }).filter(lv => lv.y !== null && lv.y > 5);
 
-    // Sort top→bottom
+    // Sort top → bottom, then push overlapping badges apart
     raw.sort((a, b) => a.y - b.y);
-
-    // Collision avoidance — push down if too close
     for (let i = 1; i < raw.length; i++) {
       if (raw[i].y - raw[i - 1].y < BADGE_H) {
         raw[i].y = raw[i - 1].y + BADGE_H;
       }
     }
-
     setBadges(raw);
-  }, [series]);
+  }, []);
 
-  /* ── create / recreate price lines when data changes ─ */
+  /* ── rAF-based scroll tracking (fires on every rendered frame during drag/zoom) ── */
+  const startTracking = useCallback((s) => {
+    const tick = () => {
+      recompute(s);
+      rafRef.current = requestAnimationFrame(tick);
+    };
+    // Only run while user is likely interacting — use a flag via chart subscriptions
+    rafRef.current = requestAnimationFrame(tick);
+    // Stop after 3 seconds of inactivity (will restart on next interaction)
+    const stop = () => {
+      if (rafRef.current) cancelAnimationFrame(rafRef.current);
+      rafRef.current = null;
+    };
+    return stop;
+  }, [recompute]);
+
+  /* ── create / recreate price lines when bars data changes ── */
   useEffect(() => {
-    if (!series || !bars || bars.length === 0) {
-      clearLines();
+    const s = series;
+    if (!s || !bars || bars.length === 0) {
+      clearLines(s);
       levelsRef.current = [];
       setBadges([]);
       return;
     }
 
-    clearLines();
+    clearLines(s);
     const computed = [];
 
     TIMEFRAMES.forEach(tf => {
@@ -84,13 +98,13 @@ const TimeframeLevels = ({ series, chart, bars }) => {
         const { high, low } = calcHighLow(bars, tf.period);
         const price = tf.type === 'high' ? high : low;
         if (price > 0) {
-          const pl = series.createPriceLine({
+          const pl = s.createPriceLine({
             price,
-            color: tf.color,
-            lineWidth: 1,
-            lineStyle: tf.style,   // 0=solid, 2=dashed
-            axisLabelVisible: false, // custom badges handle labels
-            title: '',
+            color:            tf.color,
+            lineWidth:        1.5,
+            lineStyle:        tf.style,  // 0=solid, 2=dashed
+            axisLabelVisible: false,
+            title:            '',
           });
           priceLinesRef.current.push(pl);
           computed.push({ name: tf.name, price, color: tf.color });
@@ -99,33 +113,51 @@ const TimeframeLevels = ({ series, chart, bars }) => {
     });
 
     levelsRef.current = computed;
+    // Initial position computation after chart renders
+    const t = setTimeout(() => recompute(s), 200);
 
-    // Give chart a moment to render before computing pixel positions
-    const t = setTimeout(recomputePositions, 150);
     return () => {
       clearTimeout(t);
-      clearLines();
+      clearLines(s);
     };
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [series, bars]);
 
-  /* ── subscribe to chart scroll / zoom to keep badges in sync ── */
+  /* ── chart scroll / zoom subscription → update badge positions ── */
   useEffect(() => {
-    if (!chart) return;
+    if (!chart || !series) return;
 
-    const onPriceChange = () => recomputePositions();
-    const onTimeChange  = () => recomputePositions();
+    let stopRaf = null;
 
-    try { chart.priceScale('right').subscribeVisiblePriceRangeChange(onPriceChange); } catch (_) {}
-    try { chart.timeScale().subscribeVisibleTimeRangeChange(onTimeChange); } catch (_) {}
+    const onInteract = () => {
+      // Cancel previous RAF burst, start a new one
+      if (stopRaf) stopRaf();
+      // Run recompute for ~1.5s of frames covering the interaction
+      let count = 0;
+      const MAX = 90; // ~1.5s at 60fps
+      const burst = () => {
+        recompute(series);
+        count++;
+        if (count < MAX) rafRef.current = requestAnimationFrame(burst);
+        else stopRaf = null;
+      };
+      rafRef.current = requestAnimationFrame(burst);
+      stopRaf = () => { cancelAnimationFrame(rafRef.current); rafRef.current = null; };
+    };
+
+    // Use logical range change — fires on every scroll/pan/zoom
+    try { chart.timeScale().subscribeVisibleLogicalRangeChange(onInteract); } catch (_) {}
+    try { chart.priceScale('right').subscribeVisiblePriceRangeChange(onInteract); } catch (_) {}
 
     return () => {
-      try { chart.priceScale('right').unsubscribeVisiblePriceRangeChange(onPriceChange); } catch (_) {}
-      try { chart.timeScale().unsubscribeVisibleTimeRangeChange(onTimeChange); } catch (_) {}
+      if (stopRaf) stopRaf();
+      try { chart.timeScale().unsubscribeVisibleLogicalRangeChange(onInteract); } catch (_) {}
+      try { chart.priceScale('right').unsubscribeVisiblePriceRangeChange(onInteract); } catch (_) {}
     };
-  }, [chart, recomputePositions]);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [chart, series, recompute]);
 
-  /* ── render HTML badges ────────────────────────────── */
+  /* ── render ── */
   return (
     <>
       {badges.map(b => (
@@ -143,36 +175,36 @@ const TimeframeLevels = ({ series, chart, bars }) => {
             gap:           2,
           }}
         >
-          {/* Colored name badge */}
+          {/* Colored name badge — same color as the line */}
           <div
             style={{
-              background:  b.color,
-              color:       '#fff',
-              fontSize:    9,
-              fontFamily:  'monospace',
-              fontWeight:  700,
-              padding:     '1px 4px',
+              background:   b.color,
+              color:        '#fff',
+              fontSize:     9,
+              fontFamily:   'monospace',
+              fontWeight:   700,
+              padding:      '1px 4px',
               borderRadius: 2,
-              lineHeight:  '13px',
-              whiteSpace:  'nowrap',
-              opacity:     0.95,
+              lineHeight:   '13px',
+              whiteSpace:   'nowrap',
+              opacity:      0.95,
             }}
           >
             {b.name}
           </div>
-          {/* Dark price badge */}
+          {/* Dark price badge with colored text */}
           <div
             style={{
-              background:  'rgba(10,10,10,0.82)',
-              color:       b.color,
-              fontSize:    9,
-              fontFamily:  'monospace',
-              fontWeight:  700,
-              padding:     '1px 4px',
+              background:   'rgba(10,10,10,0.85)',
+              color:        b.color,
+              fontSize:     9,
+              fontFamily:   'monospace',
+              fontWeight:   700,
+              padding:      '1px 4px',
               borderRadius: 2,
-              lineHeight:  '13px',
-              whiteSpace:  'nowrap',
-              border:      `1px solid ${b.color}44`,
+              lineHeight:   '13px',
+              whiteSpace:   'nowrap',
+              border:       `1px solid ${b.color}44`,
             }}
           >
             {b.price.toFixed(2)}

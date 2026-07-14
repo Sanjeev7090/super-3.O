@@ -2004,26 +2004,6 @@ const ChartPanel = ({
                   <span className="text-[8px] font-black text-white leading-none">OC</span>
                 </button>
               )}
-              {/* MTF Market Direction — 1H / 45M / 15M */}
-              {(mtfDirection['1H'] || mtfDirection['45M'] || mtfDirection['15M']) && (
-                <div className="flex items-center gap-0.5 ml-1 shrink-0" title="Market Direction: 1H / 45M / 15M">
-                  {[['1H', '#06b6d4'], ['45M', '#a855f7'], ['15M', '#f59e0b']].map(([tf, clr]) => {
-                    const d = mtfDirection[tf];
-                    if (!d) return null;
-                    const arrow = d === 'up' ? '▲' : d === 'down' ? '▼' : '─';
-                    const bg    = d === 'up' ? '#16a34a' : d === 'down' ? '#dc2626' : '#52525b';
-                    return (
-                      <div
-                        key={tf}
-                        style={{ background: bg, color: '#fff', fontSize: 8, fontFamily: 'monospace', fontWeight: 700, padding: '1px 3px', borderRadius: 2, lineHeight: '13px', whiteSpace: 'nowrap' }}
-                        data-testid={`mtf-dir-${tf.toLowerCase()}`}
-                      >
-                        {tf} {arrow}
-                      </div>
-                    );
-                  })}
-                </div>
-              )}
             </>
           )}
         </div>
@@ -2135,6 +2115,43 @@ const ChartPanel = ({
             <span className="text-slate-300">E: {tradeSignal.entry}</span>
             <span className="text-red-400">SL: {tradeSignal.sl}</span>
             <span className="text-emerald-400">T: {tradeSignal.target}</span>
+          </div>
+        )}
+
+        {/* MTF Market Direction — 1H / 45M / 15M — top-left chart overlay */}
+        {!tradeSignal && (mtfDirection['1H'] || mtfDirection['45M'] || mtfDirection['15M']) && (
+          <div
+            className="absolute top-2 left-2 z-20 flex items-center gap-1 pointer-events-none"
+            data-testid="mtf-direction-overlay"
+          >
+            {[['1H', '#06b6d4'], ['45M', '#a855f7'], ['15M', '#f59e0b']].map(([tf]) => {
+              const d = mtfDirection[tf];
+              if (!d) return null;
+              const arrow = d === 'up' ? '▲' : d === 'down' ? '▼' : '─';
+              const bg    = d === 'up' ? '#15803d' : d === 'down' ? '#b91c1c' : '#3f3f46';
+              const border= d === 'up' ? '#22c55e60' : d === 'down' ? '#ef444460' : '#71717a60';
+              return (
+                <div
+                  key={tf}
+                  style={{
+                    background: bg,
+                    border: `1px solid ${border}`,
+                    color: '#fff',
+                    fontSize: 10,
+                    fontFamily: 'monospace',
+                    fontWeight: 800,
+                    padding: '2px 6px',
+                    borderRadius: 4,
+                    lineHeight: '15px',
+                    whiteSpace: 'nowrap',
+                    backdropFilter: 'blur(4px)',
+                  }}
+                  data-testid={`mtf-dir-${tf.toLowerCase()}`}
+                >
+                  {tf} {arrow}
+                </div>
+              );
+            })}
           </div>
         )}
 

@@ -1,0 +1,47 @@
+{
+  "summary": "Frontend-only testing of 3 ChartPanel fixes: (1) MTF direction overlay placement, (2) High/Low lines visibility, (3) Badge scroll tracking. All 3 issues verified RESOLVED. RELIANCE stock loaded, all badges and lines confirmed working.",
+  "backend_issues": {
+    "critical": [],
+    "minor": []
+  },
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [],
+    "design_issues": [
+      {
+        "screen": "ChartPanel top area",
+        "issues": [
+          "MTF direction badges (1H ▲ / 45M ▲ / 15M ─) appear at the very top edge of chart canvas (y=236, chart starts at y=228, so 8px from top). Since LightweightCharts adds padding before rendering candlesticks, there's a small visible gap where badges appear — could visually look like a second toolbar row, but technically they ARE inside chart container. This is acceptable behavior.",
+          "4Y High / 1Y High values both show 1482.64 (same price). This is because the API loads limited bars (~120 days), not 4 years of data, so 4Y and 1Y windows produce the same max. Not a rendering bug."
+        ]
+      }
+    ]
+  },
+  "test_report_links": [],
+  "action_items": [
+    "Pre-existing React warning: 'Cannot update a component (TradingDashboard) while rendering a different component (MultiChartLayout)' — noted in iteration_23.json too, still present. Not caused by this fix."
+  ],
+  "critical_code_review_comments": [
+    "TimeframeLevels RAF burst (90 frames ~1.5s on each chart interaction) is correct and working. New badges appear/disappear correctly when price range changes.",
+    "priceScale('right').subscribeVisiblePriceRangeChange — valid LightweightCharts API, correctly subscribed in TimeframeLevels.jsx line 150.",
+    "BADGE_H=15 collision avoidance correctly prevents badge overlap by pushing overlapping badges apart.",
+    "RIGHT_OFFSET=74 correctly positions badges to the left of the price scale (confirmed by JS measurement: isToLeftOfPriceScale: True for all badges)."
+  ],
+  "updated_files": [],
+  "success_rate": {
+    "backend": "N/A (frontend-only scope)",
+    "frontend": "100% (6/6 test checks passed)"
+  },
+  "seed_data_creation": "None",
+  "retest_needed": false,
+  "should_main_agent_self_test": false,
+  "context_for_next_testing_agent": "All 3 ChartPanel issues verified fixed. Key test data: toolbar Y range=187-228, chart container starts at Y=228, MTF overlay at Y=236 (confirmed inside chart, not toolbar). TRADE btn at Y=192 (in toolbar). TimeframeLevels: 16 badges total (8 TFs x High+Low), all at right:74px from container right. data-testids working: mtf-direction-overlay, mtf-dir-1h, mtf-dir-45m, mtf-dir-15m. Toolbar text confirmed: '1D GANN EMA 9/21 PATTERNS VP SMC 3 TFS LOG Y G TRADE OC' — no direction badges in toolbar. Stock select uses onMouseDown+JS dispatch to select from dropdown.",
+  "test_results_detail": {
+    "mtf_overlay_in_chart_area": "PASS — isInsideChartArea:True, mtfDirectChildOfChart:True, overlayTop=236 (chart starts at 228, so 8px from chart top)",
+    "mtf_overlay_not_in_toolbar": "PASS — isInToolbar:False, toolbarText has no direction badges, TRADE btn Y=192 vs MTF Y=236 (44px apart)",
+    "mtf_badges_all_visible": "PASS — 1H ▲ (left=329,top=236), 45M ▲ (left=371,top=236), 15M ─ (left=418,top=236)",
+    "mtf_data_testids_correct": "PASS — mtf-direction-overlay, mtf-dir-1h, mtf-dir-45m, mtf-dir-15m all found in DOM",
+    "timeframe_high_low_lines_visible": "PASS — 16 total badges visible, isToLeftOfPriceScale:True for all, stacked right side: 4Y High(green), 1Y High(yellow), 6M High(purple), 30D High(orange), 4H High(red), 1W High(cyan), 1H High(amber), 30M High(lime)",
+    "badge_labels_follow_scroll": "PASS — 3 additional badges (1W High, 1H High, 30M High) appeared after vertical zoom, confirming RAF-based recompute works on priceScale interaction"
+  }
+}
