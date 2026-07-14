@@ -573,11 +573,72 @@ class TradingLoop:
                 daily_pnl_pct = _state.get("daily_pnl", 0.0) / max(prefs.allocated_capital, 1.0)
                 brain.update_daily_pnl_sync(daily_pnl_pct)
 
-                # Central Brain Decision - single call replaces dreamer + meta + override
+                # ── Gather scanner_inputs for HybridSuperBrain ──────────────
+                scanner_inputs: Dict = {}
+
+                # 1. SMC analysis (pre-compute from market context)
+                try:
+                    from agents.smc_analyzer import SMCAnalyzer as _SMCA
+                    scanner_inputs["smc"] = _SMCA().analyze(ctx)
+                except Exception as _se:
+                    logger.debug("[TradingLoop][%s] SMC pre-compute failed for %s: %s", cycle_id, ticker, _se)
+
+                # 2. DeltaDash score (from in-process cache — zero network cost)
+                try:
+                    import deltadash_router as _dd
+                    sym_up = symbol.upper()
+                    _cache = getattr(_dd, "_SCORE_CACHE", {})
+                    for _k, _v in _cache.items():
+                        if sym_up in _k.upper():
+                            scanner_inputs["delta"] = _v
+                            break
+                except Exception as _de:
+                    logger.debug("[TradingLoop][%s] Delta pre-compute failed for %s: %s", cycle_id, ticker, _de)
+
+                # 3. Danger scanner result (use pre-fetched danger picks if in danger mode)
+                if getattr(prefs, 'risk_tolerance', 'moderate') == 'danger':
+                    try:
+                        _d_picks = _state.get("danger_picks", [])
+                        scanner_inputs["danger"] = {
+                            "is_pick":  ticker in _d_picks or symbol in _d_picks,
+                            "picks":    _d_picks[:5],
+                        }
+                    except Exception as _dde:
+                        logger.debug("[TradingLoop][%s] Danger input failed for %s: %s", cycle_id, ticker, _dde)
+
+                # 4. ORB — compute from market context (first-candle proxy via ATR + price)
+                try:
+                    from datetime import timedelta as _td
+                    _now_ist = datetime.now(timezone.utc) + _td(hours=5, minutes=30)
+                    _mins_since_open = (_now_ist.hour * 60 + _now_ist.minute) - (9 * 60 + 15)
+                    if 0 <= _mins_since_open <= 90:   # ORB window: 9:15–10:45 IST
+                        _price = ctx.get("price", 0.0)
+                        _atr14 = ctx.get("atr14", _price * 0.015)
+                        _orb_high = ctx.get("orb_high", _price + _atr14 * 0.5)
+                        _orb_low  = ctx.get("orb_low",  _price - _atr14 * 0.5)
+                        if _price > _orb_high:
+                            _orb_sig = "BUY"
+                        elif _price < _orb_low:
+                            _orb_sig = "SELL"
+                        else:
+                            _orb_sig = "HOLD"
+                        scanner_inputs["orb"] = {
+                            "signal":   _orb_sig,
+                            "orb_high": round(_orb_high, 2),
+                            "orb_low":  round(_orb_low,  2),
+                            "mins_since_open": _mins_since_open,
+                        }
+                        logger.debug("[TradingLoop][%s] ORB %s → %s (%.0fmin since open)",
+                                     cycle_id, ticker, _orb_sig, _mins_since_open)
+                except Exception as _oe:
+                    logger.debug("[TradingLoop][%s] ORB compute failed for %s: %s", cycle_id, ticker, _oe)
+
+                # Central Brain Decision — ALL scanner inputs passed as single authority call
                 decision = brain.decide_sync(
                     market_data=ctx,
                     news="",
                     symbol=symbol,
+                    scanner_inputs=scanner_inputs,
                 )
 
                 signal     = decision.get("action", "HOLD")

@@ -341,3 +341,30 @@ Clone trading app → Add dark/light mode, mobile responsiveness, MiroFish LangG
 **Refresh button**: Added to each MultiChartLayout chart slot — "just now / Xm ago" timestamp, manual refresh SVG icon, auto-refresh every 5 min for intraday TFs (1MIN–4H).
 
 **Mobile Responsive fix**: Root cause was md:grid md:grid-cols-12 activating grid at 768px with no md:col-span-X → center took 1/12 width. Fixed: lg:grid lg:grid-cols-12 (grid only at 1024px+). Aligned all breakpoints: hamburger lg:hidden, desktop search hidden lg:block, mobile search lg:hidden. Verified: 390px mobile shows full-width chart + MENU/CHART tabs correctly.
+
+---
+
+## Feature (Feb 2026) — HybridSuperBrain Centralization (P0 Complete)
+
+**What changed:**
+
+### `hybrid_super_brain.py`
+- `think_and_decide` signature: added `scanner_inputs: Optional[Dict] = None`
+- Layer 3 (SMC): uses `scanner_inputs["smc"]` if provided → skips internal compute
+- Layer 5 (Delta): uses `scanner_inputs["delta"]` if provided → skips internal compute
+- Layer 9b (NEW): Danger integration — boosts smc_score by +15 if ticker is a danger pick
+- Layer 9c (NEW): ORB integration — adds ORB breakout signal as an extra consensus vote
+- `_elite_decision` signature: added `orb_vote: Optional[str] = None` parameter
+- ORB vote injected into consensus voting block (BUY/SELL votes)
+- `scanner_inputs_used` dict attached to every decision (for audit/logging)
+- `decide_sync`: added `scanner_inputs` param, passes to `think_and_decide`
+
+### `trading_loop.py`
+- Per-ticker loop (Step 8a): gathers 4 scanner inputs before brain call:
+  1. SMC — `SMCAnalyzer().analyze(ctx)` pre-computed
+  2. Delta — `deltadash_router._SCORE_CACHE` lookup (zero network cost)
+  3. Danger — `_state["danger_picks"]` match check (only in danger mode)
+  4. ORB — computed from price vs ATR-proxy opening range (valid 9:15–10:45 IST)
+- `brain.decide_sync(...)` now called with `scanner_inputs=scanner_inputs`
+
+**Testing**: Python assertions passed — smc_precomputed, delta_precomputed, danger_is_pick, orb_vote all confirmed in decision output. smc_score correctly shows 72+15=87 (danger boost applied).

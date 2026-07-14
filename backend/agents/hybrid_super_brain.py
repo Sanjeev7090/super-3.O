@@ -523,6 +523,7 @@ class HybridSuperBrain:
         agents:   Dict,
         survival: Dict,
         coeffs:   Dict,
+        orb_vote: Optional[str] = None,   # ORB breakout vote ("BUY" / "SELL" / None)
     ) -> Dict:
         fear         = float((survival or {}).get("fear", 0.0))
         fear_penalty = fear * float(coeffs.get("fear", 15.0))
@@ -560,6 +561,9 @@ class HybridSuperBrain:
             votes.append("SELL")
         if kronos.get("time_advantage"):
             votes.append(dreamer.get("signal", "HOLD"))
+        # ORB vote — extra confirmation from Opening Range Breakout
+        if orb_vote in ("BUY", "SELL"):
+            votes.append(orb_vote)
 
         buy_votes  = votes.count("BUY")
         sell_votes = votes.count("SELL")
@@ -641,6 +645,7 @@ class HybridSuperBrain:
         dreamer_confidence:  Optional[float] = None,
         prefs                      = None,
         risk                       = None,
+        scanner_inputs:      Optional[Dict] = None,
     ) -> Dict[str, Any]:
         """
         THE single entry point for all trading decisions.
@@ -654,14 +659,22 @@ class HybridSuperBrain:
         dreamer_confidence : optional pre-computed DreamerV3 confidence override
         prefs              : RoboPreferences object (for position sizing)
         risk               : RiskProfile object (for position sizing)
+        scanner_inputs     : pre-computed scanner results dict with keys:
+                             {
+                               "smc":    SMCAnalyzer result dict (optional, computed internally if absent)
+                               "delta":  DeltaDash score dict   (optional, computed internally if absent)
+                               "danger": danger-scan result dict (optional)
+                               "orb":    ORB breakout dict       (optional)
+                             }
         """
         market_data = market_data or {}
+        si = scanner_inputs or {}   # short alias
 
         if not self.brain_enabled:
             return self._hold(symbol, reason="Brain disabled")
 
-        # Cache check
-        cache_key = f"{symbol}_{int(time.time() // self._cache_ttl)}"
+        # Cache check — include scanner_inputs presence in key so fresh scanners bypass stale cache
+        cache_key = f"{symbol}_{int(time.time() // self._cache_ttl)}_{'si' if si else 'ns'}"
         if cache_key in self._decision_cache:
             return self._decision_cache[cache_key]
 
@@ -675,15 +688,23 @@ class HybridSuperBrain:
             # ── Layer 2: DreamerV3 ───────────────────────────────────────────
             dreamer = self._layer_dreamer(symbol, dreamer_confidence)
 
-            # ── Layer 3: SMC ─────────────────────────────────────────────────
-            smc_input   = chart_data if chart_data else market_data
-            smc_analysis = self.smc.analyze(smc_input)
+            # ── Layer 3: SMC — use pre-computed result if provided ────────────
+            if si.get("smc"):
+                smc_analysis = si["smc"]
+                logger.debug("[Brain] Layer3 SMC — using pre-computed scanner result")
+            else:
+                smc_input    = chart_data if chart_data else market_data
+                smc_analysis = self.smc.analyze(smc_input)
 
             # ── Layer 4: Kronos cycle ─────────────────────────────────────────
             kronos_signal = self.kronos.get_cycle_signal(symbol)
 
-            # ── Layer 5: DeltaDash ───────────────────────────────────────────
-            delta_score = self.deltadash.get_score(symbol)
+            # ── Layer 5: DeltaDash — use pre-computed result if provided ──────
+            if si.get("delta"):
+                delta_score = si["delta"]
+                logger.debug("[Brain] Layer5 Delta — using pre-computed scanner result")
+            else:
+                delta_score = self.deltadash.get_score(symbol)
 
             # ── Layer 6: MiroFish (async, parallel) ──────────────────────────
             miro_task = asyncio.create_task(
@@ -698,6 +719,23 @@ class HybridSuperBrain:
 
             # ── Layer 9: Market Context ──────────────────────────────────────
             ctx = self._layer_market_context(market_data, symbol)
+
+            # ── Layer 9b: Danger scanner integration ─────────────────────────
+            danger_result = si.get("danger") or {}
+            if danger_result:
+                # Boost SMC score if this ticker is a danger pick
+                if danger_result.get("is_pick") and not smc_analysis.get("danger_boost_applied"):
+                    smc_analysis = dict(smc_analysis)
+                    smc_analysis["smc_score"] = min(100, float(smc_analysis.get("smc_score", 50)) + 15)
+                    smc_analysis["danger_boost_applied"] = True
+                    logger.debug("[Brain] Layer9b Danger boost applied for %s", symbol)
+
+            # ── Layer 9c: ORB (Opening Range Breakout) integration ────────────
+            orb_result = si.get("orb") or {}
+            orb_vote = None
+            if orb_result and orb_result.get("signal") in ("BUY", "SELL"):
+                orb_vote = orb_result["signal"]
+                logger.debug("[Brain] Layer9c ORB vote=%s for %s", orb_vote, symbol)
 
             # ── Layer 10: Psychological + Survival ───────────────────────────
             psych           = self._psychological_analysis(ctx, news)
@@ -715,13 +753,23 @@ class HybridSuperBrain:
                 smc_analysis, kronos_signal, agents, coeffs,
             )
 
-            # ── Layer 12: Elite Decision ─────────────────────────────────────
+            # ── Layer 12: Elite Decision (with ORB vote injected) ────────────
             decision = self._elite_decision(
                 miro_result, dreamer, delta_score,
                 psych, meta, smc_analysis, kronos_signal,
                 agents, survival_status, coeffs,
+                orb_vote=orb_vote,
             )
             decision["symbol"] = symbol
+
+            # Attach scanner_inputs summary to decision for audit
+            decision["scanner_inputs_used"] = {
+                "smc_precomputed":    bool(si.get("smc")),
+                "delta_precomputed":  bool(si.get("delta")),
+                "danger_present":     bool(danger_result),
+                "danger_is_pick":     danger_result.get("is_pick", False),
+                "orb_vote":           orb_vote,
+            }
 
             # ── Layer 13: Position Sizing ────────────────────────────────────
             sizing = self._calc_position_size(
@@ -796,6 +844,7 @@ class HybridSuperBrain:
         dreamer_confidence: Optional[float] = None,
         prefs               = None,
         risk                = None,
+        scanner_inputs:     Optional[Dict] = None,
     ) -> Dict[str, Any]:
         """
         Synchronous wrapper. Used by:
@@ -819,6 +868,7 @@ class HybridSuperBrain:
                     dreamer_confidence=dreamer_confidence,
                     prefs=prefs,
                     risk=risk,
+                    scanner_inputs=scanner_inputs,
                 )
             )
         except Exception as e:
