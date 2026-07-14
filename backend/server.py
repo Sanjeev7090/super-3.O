@@ -13338,4 +13338,107 @@ async def bs_calculate(req: BSCalcRequest):
     except Exception as e:
         raise HTTPException(status_code=400, detail=str(e))
 
+
+# ── IV Solver ──
+class IVSolverRequest(BaseModel):
+    S: float
+    K: float
+    T_days: float
+    r: float
+    market_price: float
+    option_type: str = "call"   # "call" or "put"
+    dividend_yield: float = 0.0
+
+def _bs_price_for_iv(S, K, T, r, sigma, q, option_type):
+    if sigma <= 0 or T <= 0:
+        return max(S - K, 0) if option_type == "call" else max(K - S, 0)
+    d1 = (np.log(S / K) + (r - q + 0.5 * sigma ** 2) * T) / (sigma * np.sqrt(T))
+    d2 = d1 - sigma * np.sqrt(T)
+    if option_type == "call":
+        return S * np.exp(-q * T) * _scipy_norm.cdf(d1) - K * np.exp(-r * T) * _scipy_norm.cdf(d2)
+    else:
+        return K * np.exp(-r * T) * _scipy_norm.cdf(-d2) - S * np.exp(-q * T) * _scipy_norm.cdf(-d1)
+
+def _bs_vega_raw(S, K, T, r, sigma, q):
+    if sigma <= 0 or T <= 0:
+        return 1e-10
+    d1 = (np.log(S / K) + (r - q + 0.5 * sigma ** 2) * T) / (sigma * np.sqrt(T))
+    return S * np.exp(-q * T) * _scipy_norm.pdf(d1) * np.sqrt(T)
+
+@_bs_router.post("/iv-solver")
+async def bs_iv_solver(req: IVSolverRequest):
+    try:
+        S, K, r, q = req.S, req.K, req.r, req.dividend_yield
+        T = req.T_days / 365.0
+        market_price = req.market_price
+        option_type = req.option_type.lower()
+
+        if T <= 0:
+            raise HTTPException(status_code=400, detail="Days to expiry must be > 0")
+        if market_price <= 0:
+            raise HTTPException(status_code=400, detail="Market price must be > 0")
+
+        # Intrinsic value check
+        intrinsic = max(S - K, 0) if option_type == "call" else max(K - S, 0)
+        if market_price < intrinsic - 0.01:
+            raise HTTPException(status_code=400, detail=f"Market price {market_price} < intrinsic value {intrinsic:.2f}")
+
+        # Newton-Raphson IV solver
+        sigma = 0.20   # initial guess
+        MAX_ITER = 100
+        TOLERANCE = 1e-6
+        converged = False
+
+        for i in range(MAX_ITER):
+            price = _bs_price_for_iv(S, K, T, r, sigma, q, option_type)
+            vega  = _bs_vega_raw(S, K, T, r, sigma, q)
+            diff  = price - market_price
+            if abs(diff) < TOLERANCE:
+                converged = True
+                break
+            if abs(vega) < 1e-10:
+                break
+            sigma -= diff / vega
+            sigma = max(0.001, min(sigma, 20.0))   # clamp to [0.1%, 2000%]
+
+        if sigma <= 0 or not converged:
+            # Bisection fallback
+            low, high = 0.001, 10.0
+            for _ in range(200):
+                mid = (low + high) / 2.0
+                p   = _bs_price_for_iv(S, K, T, r, mid, q, option_type)
+                if abs(p - market_price) < TOLERANCE:
+                    sigma = mid
+                    converged = True
+                    break
+                if p < market_price:
+                    low = mid
+                else:
+                    high = mid
+            sigma = (low + high) / 2.0
+            converged = True
+
+        iv_pct = round(sigma * 100, 4)
+
+        # Recalculate full greeks at solved IV
+        d1 = (np.log(S / K) + (r - q + 0.5 * sigma ** 2) * T) / (sigma * np.sqrt(T))
+        d2 = d1 - sigma * np.sqrt(T)
+        vega_greek = round(_bs_vega_raw(S, K, T, r, sigma, q) / 100, 4)
+
+        return {
+            "iv": sigma,
+            "iv_pct": iv_pct,
+            "converged": converged,
+            "option_type": option_type,
+            "theoretical_price": round(_bs_price_for_iv(S, K, T, r, sigma, q, option_type), 2),
+            "market_price": market_price,
+            "d1": round(d1, 4),
+            "d2": round(d2, 4),
+            "vega": vega_greek,
+        }
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=400, detail=str(e))
+
 app.include_router(_bs_router)

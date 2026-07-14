@@ -20,6 +20,129 @@ const GreekRow = ({ label, callVal, putVal, color }) => (
   </div>
 );
 
+// ── IV Solver sub-panel ──
+function IVSolverPanel({ sharedForm }) {
+  const [iv, setIv] = useState({ market_price: '', option_type: 'call', S: '', K: '', T_days: '', r: '' });
+  const [ivResult, setIvResult] = useState(null);
+  const [ivLoading, setIvLoading] = useState(false);
+  const [ivError, setIvError]   = useState('');
+
+  // Sync shared BS form values as defaults
+  const getField = (key) => iv[key] !== '' ? iv[key] : (sharedForm[key] ?? '');
+
+  const solveIV = useCallback(async () => {
+    setIvLoading(true);
+    setIvError('');
+    setIvResult(null);
+    try {
+      const payload = {
+        S: +getField('S'), K: +getField('K'),
+        T_days: +getField('T_days'), r: +getField('r'),
+        market_price: +iv.market_price,
+        option_type: iv.option_type,
+        dividend_yield: 0,
+      };
+      const res = await fetch(`${API}/api/black-scholes/iv-solver`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload),
+      });
+      if (!res.ok) { const e = await res.json(); throw new Error(e.detail || 'Error'); }
+      setIvResult(await res.json());
+    } catch (e) {
+      setIvError(e.message);
+    } finally {
+      setIvLoading(false);
+    }
+  }, [iv, sharedForm]);
+
+  return (
+    <div className="mt-4 pt-4 border-t border-white/10" data-testid="iv-solver-panel">
+      <p className="text-[9px] font-black uppercase tracking-widest text-amber-400 mb-3">
+        IV Solver — Implied Volatility Calculator
+      </p>
+      <p className="text-[9px] text-zinc-600 mb-3">
+        Market option price daalo → IV automatically calculate hogi (Newton-Raphson)
+      </p>
+
+      {/* Option type toggle */}
+      <div className="flex gap-1.5 mb-3">
+        {['call', 'put'].map(t => (
+          <button
+            key={t}
+            onClick={() => setIv(v => ({ ...v, option_type: t }))}
+            className={`flex-1 py-1.5 rounded text-[10px] font-black uppercase tracking-wider transition-all ${
+              iv.option_type === t
+                ? t === 'call' ? 'bg-emerald-500/20 border border-emerald-500/50 text-emerald-400'
+                               : 'bg-rose-500/20 border border-rose-500/50 text-rose-400'
+                : 'border border-white/10 text-zinc-500 hover:text-white'
+            }`}
+            data-testid={`iv-type-${t}`}
+          >
+            {t.toUpperCase()}
+          </button>
+        ))}
+      </div>
+
+      {/* Market price input */}
+      <div className="mb-2">
+        <label className="text-[9px] font-bold uppercase tracking-widest text-zinc-500 block mb-1">
+          Market Option Price (₹) <span className="text-amber-400">*</span>
+        </label>
+        <input
+          type="number" step="0.5"
+          value={iv.market_price}
+          onChange={e => setIv(v => ({ ...v, market_price: e.target.value }))}
+          placeholder="e.g. 205"
+          className="w-full bg-white/5 border border-amber-500/40 rounded px-2.5 py-1.5 text-[12px] font-mono text-white focus:outline-none focus:border-amber-500 placeholder-zinc-600"
+          data-testid="iv-market-price"
+        />
+      </div>
+
+      <p className="text-[9px] text-zinc-600 mb-2">
+        Baaki fields blank raho to BS Calculator ke values use honge ↑
+      </p>
+
+      <button
+        onClick={solveIV}
+        disabled={ivLoading || !iv.market_price}
+        className="w-full py-2 rounded-lg bg-amber-500/20 border border-amber-500/40 hover:bg-amber-500/30 disabled:opacity-40 text-amber-400 text-[11px] font-black uppercase tracking-wider transition-all"
+        data-testid="iv-solve-btn"
+      >
+        {ivLoading ? 'Solving...' : 'Solve IV'}
+      </button>
+
+      {ivError && (
+        <p className="text-[11px] text-rose-400 mt-2 bg-rose-500/10 border border-rose-500/20 rounded px-3 py-2">{ivError}</p>
+      )}
+
+      {ivResult && (
+        <div className="mt-3 bg-amber-500/10 border border-amber-500/30 rounded-lg p-3 space-y-2" data-testid="iv-result">
+          <div className="flex items-center justify-between">
+            <span className="text-[9px] font-bold uppercase text-zinc-400">Implied Volatility</span>
+            <span className="text-2xl font-black text-amber-400" data-testid="iv-value">{ivResult.iv_pct}%</span>
+          </div>
+          <div className="flex gap-2 text-center">
+            {[
+              { label: 'Theo Price', val: `₹${ivResult.theoretical_price}` },
+              { label: 'Market',     val: `₹${ivResult.market_price}` },
+              { label: 'Vega',       val: ivResult.vega },
+            ].map(({ label, val }) => (
+              <div key={label} className="flex-1 bg-white/[0.03] border border-white/10 rounded px-1 py-1.5">
+                <p className="text-[8px] text-zinc-500 font-bold uppercase">{label}</p>
+                <p className="text-[11px] font-mono text-zinc-300">{val}</p>
+              </div>
+            ))}
+          </div>
+          <p className="text-[9px] text-zinc-600">
+            {ivResult.converged ? '✓ Converged' : '~ Approximate'} · d1={ivResult.d1} · d2={ivResult.d2}
+          </p>
+        </div>
+      )}
+    </div>
+  );
+}
+
 export default function BlackScholesPanel() {
   const [form, setForm] = useState({ S: 24500, K: 24500, T_days: 7, r: 0.065, sigma: 0.14, dividend_yield: 0.0 });
   const [result, setResult] = useState(null);
@@ -164,6 +287,9 @@ export default function BlackScholesPanel() {
           </p>
         </div>
       )}
+
+      {/* IV Solver */}
+      <IVSolverPanel sharedForm={form} />
     </div>
   );
 }
