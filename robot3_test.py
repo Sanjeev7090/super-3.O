@@ -8,7 +8,7 @@ import requests
 import time
 import sys
 
-BASE_URL = "https://responsive-trader-1.preview.emergentagent.com"
+BASE_URL = "https://ai-charts-live-1.preview.emergentagent.com"
 API_URL = f"{BASE_URL}/api"
 
 def log_test(name, success, details=""):
