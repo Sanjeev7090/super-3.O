@@ -556,6 +556,8 @@ const ChartPanel = ({
   const [vpEnabled, setVpEnabled] = useState(false);
   const [vpActive, setVpActive] = useState(false);
   const [vpTooltip, setVpTooltip] = useState(null);
+  // MTF Market Direction — 1H / 45M / 15M
+  const [mtfDirection, setMtfDirection] = useState({ '1H': null, '45M': null, '15M': null });
   const { theme } = useTheme();
 
   const TF_GROUPS = [
@@ -598,6 +600,34 @@ const ChartPanel = ({
       gannLineSeriesRef.current = [];
     }
   };
+
+  // ── MTF Direction fetch (1H / 45M / 15M) ──────────────────────
+  const fetchMtfDirection = useCallback(async (ticker) => {
+    if (!ticker || isCrypto) { setMtfDirection({ '1H': null, '45M': null, '15M': null }); return; }
+    const sym = ticker.replace('.NS','').replace('.BO','').replace(/^\^/,'');
+    const TFS = [
+      { label: '1H',  interval: '1h',  days_back: 3 },
+      { label: '45M', interval: '45m', days_back: 7 },
+      { label: '15M', interval: '15m', days_back: 2 },
+    ];
+    const results = { '1H': null, '45M': null, '15M': null };
+    await Promise.allSettled(TFS.map(async ({ label, interval, days_back }) => {
+      try {
+        const r = await fetch(`${API}/groww/candles/${sym}?interval=${interval}&days_back=${days_back}`);
+        if (!r.ok) return;
+        const d = await r.json();
+        const bars = d.bars || [];
+        if (bars.length < 3) return;
+        const last  = bars[bars.length - 1].close;
+        const prev3 = bars[Math.max(0, bars.length - 4)].close;
+        if (last > prev3 * 1.0015)      results[label] = 'up';
+        else if (last < prev3 * 0.9985) results[label] = 'down';
+        else                             results[label] = 'side';
+      } catch (_) {}
+    }));
+    setMtfDirection(results);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [isCrypto]);
 
   // ── Volume Profile helpers ───────────────────────────────────────
   const clearVPLines = useCallback(() => {
@@ -1313,7 +1343,7 @@ const ChartPanel = ({
           vertLines: { color: isDark ? 'rgba(255,255,255,0.03)' : 'rgba(0,0,0,0.04)' },
           horzLines: { color: isDark ? 'rgba(255,255,255,0.03)' : 'rgba(0,0,0,0.04)' },
         },
-        rightPriceScale: { borderColor: isDark ? 'rgba(255,255,255,0.08)' : 'rgba(0,0,0,0.1)', mode: semiLogScale ? 2 : 0 },
+        rightPriceScale: { borderColor: isDark ? 'rgba(255,255,255,0.08)' : 'rgba(0,0,0,0.1)', mode: semiLogScale ? 2 : 0, minimumWidth: 70 },
         timeScale: { borderColor: isDark ? 'rgba(255,255,255,0.08)' : 'rgba(0,0,0,0.1)', timeVisible: true, rightOffset: 10, barSpacing: 6, minBarSpacing: 0.5 },
         crosshair: { mode: 1 },
         localization: { locale: 'en-US' },
@@ -1477,6 +1507,13 @@ const ChartPanel = ({
       if (ema21SeriesRef.current) ema21SeriesRef.current.applyOptions({ visible: emaActive });
     } catch (e) { /* series may be disposed */ }
   }, [emaActive]);
+
+  // ── MTF Direction fetch — triggers when stock changes ─────────
+  useEffect(() => {
+    const ticker = selectedStock?.ticker || selectedStock?.symbol;
+    if (ticker) fetchMtfDirection(ticker);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [selectedStock]);
 
   // ── Parity Trade Signal Lines (Buy/Sell/SL/Target) ────────────
   useEffect(() => {
@@ -1967,6 +2004,26 @@ const ChartPanel = ({
                   <span className="text-[8px] font-black text-white leading-none">OC</span>
                 </button>
               )}
+              {/* MTF Market Direction — 1H / 45M / 15M */}
+              {(mtfDirection['1H'] || mtfDirection['45M'] || mtfDirection['15M']) && (
+                <div className="flex items-center gap-0.5 ml-1 shrink-0" title="Market Direction: 1H / 45M / 15M">
+                  {[['1H', '#06b6d4'], ['45M', '#a855f7'], ['15M', '#f59e0b']].map(([tf, clr]) => {
+                    const d = mtfDirection[tf];
+                    if (!d) return null;
+                    const arrow = d === 'up' ? '▲' : d === 'down' ? '▼' : '─';
+                    const bg    = d === 'up' ? '#16a34a' : d === 'down' ? '#dc2626' : '#52525b';
+                    return (
+                      <div
+                        key={tf}
+                        style={{ background: bg, color: '#fff', fontSize: 8, fontFamily: 'monospace', fontWeight: 700, padding: '1px 3px', borderRadius: 2, lineHeight: '13px', whiteSpace: 'nowrap' }}
+                        data-testid={`mtf-dir-${tf.toLowerCase()}`}
+                      >
+                        {tf} {arrow}
+                      </div>
+                    );
+                  })}
+                </div>
+              )}
             </>
           )}
         </div>
@@ -2226,9 +2283,10 @@ const ChartPanel = ({
           strategyType={activeStrategy}
           isActive={!!activeStrategy && !!strategyData}
         />
-        
-        {/* Timeframe Levels - Always visible */}
-        <TimeframeLevels 
+
+        {/* Timeframe Levels — custom HTML badges inside chart area */}
+        <TimeframeLevels
+          chart={chartRef.current}
           series={candlestickSeriesRef.current}
           bars={stockData?.bars}
         />

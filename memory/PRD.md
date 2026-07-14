@@ -302,7 +302,30 @@ Clone trading app → Add dark/light mode, mobile responsiveness, MiroFish LangG
 
 ---
 
-## Update (Feb 2026) — Full Dashboard Redesign: SCAN/STRAT/TRADERS/PAPER/SETTINGS Shell
+## Update (Feb 2026) — TimeframeLevels Custom Badge Overlay + MTF Direction Indicators
+
+### TimeframeLevels.jsx — Complete Redesign
+- Price lines now use `axisLabelVisible: false` (removed from price axis to avoid overlap)
+- Custom HTML badges rendered as absolute-positioned overlays inside chart container
+- Badge format: `[colored name badge] [dark price badge]` — colors match horizontal lines exactly
+- Right offset: `74px` from container edge — clears the price scale completely
+- Collision avoidance: when multiple levels at same price (e.g., many Lows = 555.75), badges auto-shift down
+- Live position tracking: subscribes to `priceScale.subscribeVisiblePriceRangeChange` + `timeScale.subscribeVisibleTimeRangeChange` — badges move with scroll/zoom
+- Auto-adjust: `axisLabelVisible: false` means LW chart scales to ONLY the candlestick data (4Y High no longer forces chart to zoom out)
+
+### MTF Market Direction Badges (1H / 45M / 15M)
+- Added `mtfDirection` state + `fetchMtfDirection()` useCallback in ChartPanel.jsx
+- Fetches last bars from `/api/groww/candles/{sym}?interval={tf}` for each timeframe on stock change
+- Direction: last close vs 3-bars-ago close (±0.15% threshold → UP ▲ / DOWN ▼ / SIDE ─)
+- Shown as small colored badges in the toolbar immediately after the OC button
+- Colors: UP=green, DOWN=red, SIDE=gray
+- Not shown for crypto charts
+
+### Chart Fixes
+- `rightPriceScale: { minimumWidth: 70 }` — ensures price scale has consistent width
+- TimeframeLevels moved INSIDE chart container div (was outside before) to enable absolute positioning
+
+
 
 **User request**: "Main Dashboard Layout: Top Bar (Nifty/BankNifty/Sensex big numbers), Left Sidebar Nav (SCAN/STRAT/TRADERS/PAPER/SETTINGS), Center (Live Chart + Key Indicators), Right Panel (tab-based Signals/Positions/Risk), mobile sidebar collapse."
 
