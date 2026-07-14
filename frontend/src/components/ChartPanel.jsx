@@ -620,9 +620,10 @@ const ChartPanel = ({
         if (bars.length < 3) return;
         const last  = bars[bars.length - 1].close;
         const prev3 = bars[Math.max(0, bars.length - 4)].close;
-        if (last > prev3 * 1.0015)      results[label] = 'up';
-        else if (last < prev3 * 0.9985) results[label] = 'down';
-        else                             results[label] = 'side';
+        const pct   = ((last - prev3) / prev3 * 100).toFixed(2);
+        if (last > prev3 * 1.0015)      results[label] = { dir: 'up',   pct: `+${pct}%` };
+        else if (last < prev3 * 0.9985) results[label] = { dir: 'down', pct: `${pct}%`  };
+        else                             results[label] = { dir: 'side', pct: `${pct}%`  };
       } catch (_) {}
     }));
     setMtfDirection(results);
@@ -2127,28 +2128,30 @@ const ChartPanel = ({
             {[['1H', '#06b6d4'], ['45M', '#a855f7'], ['15M', '#f59e0b']].map(([tf]) => {
               const d = mtfDirection[tf];
               if (!d) return null;
-              const arrow = d === 'up' ? '▲' : d === 'down' ? '▼' : '─';
-              const bg    = d === 'up' ? '#15803d' : d === 'down' ? '#b91c1c' : '#3f3f46';
-              const border= d === 'up' ? '#22c55e60' : d === 'down' ? '#ef444460' : '#71717a60';
+              const dir    = d.dir || d;
+              const pct    = d.pct || '';
+              const arrow  = dir === 'up' ? '▲' : dir === 'down' ? '▼' : '─';
+              const bg     = dir === 'up' ? '#15803d' : dir === 'down' ? '#b91c1c' : '#3f3f46';
+              const border = dir === 'up' ? '#22c55e60' : dir === 'down' ? '#ef444460' : '#71717a60';
               return (
                 <div
                   key={tf}
                   style={{
-                    background: bg,
-                    border: `1px solid ${border}`,
-                    color: '#fff',
-                    fontSize: 10,
-                    fontFamily: 'monospace',
-                    fontWeight: 800,
-                    padding: '2px 6px',
-                    borderRadius: 4,
-                    lineHeight: '15px',
-                    whiteSpace: 'nowrap',
+                    background:     bg,
+                    border:         `1px solid ${border}`,
+                    color:          '#fff',
+                    fontSize:       10,
+                    fontFamily:     'monospace',
+                    fontWeight:     800,
+                    padding:        '2px 6px',
+                    borderRadius:   4,
+                    lineHeight:     '15px',
+                    whiteSpace:     'nowrap',
                     backdropFilter: 'blur(4px)',
                   }}
                   data-testid={`mtf-dir-${tf.toLowerCase()}`}
                 >
-                  {tf} {arrow}
+                  {tf} {arrow}{pct ? ` ${pct}` : ''}
                 </div>
               );
             })}
