@@ -111,7 +111,7 @@ function StockSearchBar({ slot, onSelect }) {
           onChange={handleInput}
           onFocus={() => { setOpen(true); setQuery(''); }}
           placeholder={displayName}
-          className="w-full bg-zinc-900 border border-zinc-700/60 text-zinc-200 text-[11px] rounded px-2 py-1 placeholder-zinc-500 outline-none focus:border-violet-500/60 transition-colors min-w-0"
+          className="w-full bg-white dark:bg-zinc-900 border border-slate-200 dark:border-zinc-700/60 text-slate-800 dark:text-zinc-200 text-[11px] rounded px-2 py-1 placeholder-slate-400 dark:placeholder-zinc-500 outline-none focus:border-violet-500/60 transition-colors min-w-0"
           style={{ maxWidth: '100%' }}
         />
         {searching && (
@@ -123,20 +123,20 @@ function StockSearchBar({ slot, onSelect }) {
       {open && results.length > 0 && (
         <div
           ref={dropRef}
-          className="absolute top-full left-0 mt-1 bg-zinc-900 border border-zinc-700/60 rounded-lg shadow-2xl z-50 w-72 max-h-56 overflow-y-auto"
+          className="absolute top-full left-0 mt-1 bg-white dark:bg-zinc-900 border border-slate-200 dark:border-zinc-700/60 rounded-lg shadow-2xl z-50 w-72 max-h-56 overflow-y-auto"
         >
           {results.map((r, i) => (
             <button
               key={r.ticker || i}
               onMouseDown={() => choose(r)}
-              className="w-full text-left px-3 py-2 hover:bg-zinc-800 flex items-center justify-between gap-2 group transition-colors"
+              className="w-full text-left px-3 py-2 hover:bg-slate-50 dark:hover:bg-zinc-800 flex items-center justify-between gap-2 group transition-colors"
             >
               <span className="text-[11px] font-mono font-bold text-emerald-400 shrink-0 group-hover:text-emerald-300">
                 {(r.ticker || '').replace('.NS','').replace('.BO','')}
               </span>
-              <span className="text-[10px] text-zinc-400 truncate flex-1">{r.name}</span>
+              <span className="text-[10px] text-slate-500 dark:text-zinc-400 truncate flex-1">{r.name}</span>
               {r.exchange && (
-                <span className="text-[9px] text-zinc-600 shrink-0">{r.exchange}</span>
+                <span className="text-[9px] text-slate-400 dark:text-zinc-600 shrink-0">{r.exchange}</span>
               )}
             </button>
           ))}
@@ -251,15 +251,15 @@ function ChartSlot({ slot, onUpdate, isCompact, onOpenOptionChain }) {
   }, [slot.lastFetched, Math.floor((Date.now() - (slot.lastFetched || 0)) / 30000)]);
 
   return (
-    <div className="flex flex-col h-full bg-[#090909] border border-zinc-800/60 rounded-lg overflow-hidden">
+    <div className="flex flex-col h-full bg-white dark:bg-[#090909] border border-slate-200 dark:border-zinc-800/60 rounded-lg overflow-hidden">
       {/* Slot header */}
-      <div className="shrink-0 flex items-center gap-2 px-2 py-1.5 bg-zinc-950 border-b border-zinc-800/60">
+      <div className="shrink-0 flex items-center gap-2 px-2 py-1.5 bg-slate-50 dark:bg-zinc-950 border-b border-slate-200 dark:border-zinc-800/60">
         <StockSearchBar slot={slot} onSelect={handleStockSelect} />
         {slot.selectedStock && (
           <div className="shrink-0 flex items-center gap-1.5">
-            <span className="text-[10px] text-zinc-500">{slot.timeframe?.label || '1D'}</span>
+            <span className="text-[10px] text-slate-500 dark:text-zinc-500">{slot.timeframe?.label || '1D'}</span>
             {ageLabel && !slot.loading && (
-              <span className="text-[9px] text-zinc-600" title="Last data refresh">{ageLabel}</span>
+              <span className="text-[9px] text-slate-400 dark:text-zinc-600" title="Last data refresh">{ageLabel}</span>
             )}
             {slot.loading ? (
               <span className="text-[9px] text-violet-400 animate-pulse" title="Loading…">●</span>
@@ -268,7 +268,7 @@ function ChartSlot({ slot, onUpdate, isCompact, onOpenOptionChain }) {
                 onClick={() => slot.selectedStock && fetchData(slot.selectedStock.ticker, slot.timeframe)}
                 title="Refresh chart data"
                 data-testid={`refresh-slot-${slot.id}`}
-                className="text-zinc-600 hover:text-emerald-400 transition-colors"
+                className="text-slate-400 dark:text-zinc-600 hover:text-emerald-500 dark:hover:text-emerald-400 transition-colors"
               >
                 <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
                   <polyline points="23 4 23 10 17 10"/>
@@ -303,12 +303,12 @@ function ChartSlot({ slot, onUpdate, isCompact, onOpenOptionChain }) {
             onOpenOptionChain={onOpenOptionChain}
           />
         ) : (
-          <div className="h-full flex flex-col items-center justify-center text-zinc-700 gap-2 select-none">
+          <div className="h-full flex flex-col items-center justify-center text-slate-300 dark:text-zinc-700 gap-2 select-none">
             <svg width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5">
               <path d="M3 3v18h18" strokeLinecap="round"/>
               <path d="M7 16l4-4 4 4 4-7" strokeLinecap="round" strokeLinejoin="round"/>
             </svg>
-            <p className="text-[11px]">Search and select a stock above</p>
+            <p className="text-[11px] text-slate-400 dark:text-zinc-600">Search and select a stock above</p>
           </div>
         )}
       </div>
@@ -436,8 +436,8 @@ export default function MultiChartLayout({
   return (
     <div className="flex flex-col h-full min-h-0">
       {/* Layout switcher toolbar */}
-      <div className="shrink-0 flex items-center gap-1.5 px-2 py-1 bg-zinc-950 border-b border-zinc-800/60">
-        <span className="text-[10px] text-zinc-600 font-semibold uppercase tracking-wide mr-1">Layout</span>
+      <div className="shrink-0 flex items-center gap-1.5 px-2 py-1 bg-white dark:bg-zinc-950 border-b border-slate-200 dark:border-zinc-800/60">
+        <span className="text-[10px] text-slate-500 dark:text-zinc-600 font-semibold uppercase tracking-wide mr-1">Layout</span>
         {[
           { n: 1, Icon: Icon1, label: '1 Chart'  },
           { n: 2, Icon: Icon2, label: '2 Charts' },
@@ -450,14 +450,14 @@ export default function MultiChartLayout({
             className={`flex items-center gap-1 px-2 py-1 rounded text-[10px] font-semibold transition-colors border ${
               layout === n
                 ? 'bg-violet-600/30 border-violet-500/50 text-violet-300'
-                : 'bg-zinc-900 border-zinc-700/50 text-zinc-500 hover:text-zinc-300 hover:border-zinc-600'
+                : 'bg-slate-100 dark:bg-zinc-900 border-slate-200 dark:border-zinc-700/50 text-slate-500 dark:text-zinc-500 hover:text-slate-700 dark:hover:text-zinc-300 hover:border-slate-300 dark:hover:border-zinc-600'
             }`}
           >
             <Icon />
             <span>{label}</span>
           </button>
         ))}
-        <div className="ml-auto text-[10px] text-zinc-600">
+        <div className="ml-auto text-[10px] text-slate-400 dark:text-zinc-600">
           {visibleCount > 1 && `${visibleCount} independent charts`}
         </div>
       </div>
