@@ -436,18 +436,17 @@ export default function MultiChartLayout({
   return (
     <div className="flex flex-col h-full min-h-0">
       {/* Layout switcher toolbar */}
-      <div className="shrink-0 flex items-center gap-0 px-2 py-1 bg-white dark:bg-zinc-950 border-b border-slate-200 dark:border-zinc-800/60">
+      <div className="shrink-0 flex items-center px-2 py-1 bg-white dark:bg-zinc-950 border-b border-slate-200 dark:border-zinc-800/60">
         {[
           { n: 1, Icon: Icon1, label: '1 Chart'  },
           { n: 2, Icon: Icon2, label: '2 Charts' },
           { n: 4, Icon: Icon4, label: '4 Charts' },
         ].map(({ n, Icon, label }, idx) => (
-          <>
+          <React.Fragment key={n}>
             {idx > 0 && (
-              <div key={`sep-${n}`} className="w-px h-4 bg-slate-200 dark:bg-zinc-700/60 mx-1.5 shrink-0" />
+              <div className="w-px h-4 bg-slate-200 dark:bg-zinc-700/60 mx-1.5 shrink-0" />
             )}
             <button
-              key={n}
               onClick={() => handleLayoutChange(n)}
               title={label}
               className={`flex items-center gap-1 px-1.5 py-0.5 rounded text-[9px] font-semibold transition-colors ${
@@ -459,7 +458,7 @@ export default function MultiChartLayout({
               <Icon />
               <span>{label}</span>
             </button>
-          </>
+          </React.Fragment>
         ))}
       </div>
 
