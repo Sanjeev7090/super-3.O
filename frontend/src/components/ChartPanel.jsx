@@ -241,6 +241,192 @@ function detectEmaCross(bars, ema9, ema21, lookback = 5) {
   return null;
 }
 
+// ── Auto Trendline Detection ─────────────────────────────────────────────────
+// Types: Uptrend Support, Downtrend Resistance, H-Support, H-Resistance,
+//        Ascending/Descending Channel, Fibonacci Retracement
+function detectTrendlines(bars) {
+  if (!bars || bars.length < 20) return [];
+  const n = bars.length;
+  const W = Math.max(3, Math.floor(n / 25));   // adaptive pivot window
+  const allHighs = [], allLows = [];
+
+  for (let i = W; i < n - W; i++) {
+    let ph = true, pl = true;
+    for (let j = i - W; j <= i + W; j++) {
+      if (j === i) continue;
+      if (bars[j].high >= bars[i].high) ph = false;
+      if (bars[j].low  <= bars[i].low)  pl = false;
+    }
+    if (ph) allHighs.push({ i, price: bars[i].high, ts: bars[i].timestamp / 1000 });
+    if (pl) allLows.push({  i, price: bars[i].low,  ts: bars[i].timestamp / 1000 });
+  }
+  if (allHighs.length < 2 && allLows.length < 2) return [];
+
+  const priceRange = Math.max(...bars.map(b => b.high)) - Math.min(...bars.map(b => b.low));
+  if (priceRange <= 0) return [];
+  const touchTol = priceRange * 0.007;
+  const lastTs   = bars[n - 1].timestamp / 1000;
+  const firstTs  = bars[0].timestamp / 1000;
+
+  function countTouches(startI, startP, slope, useHigh) {
+    let cnt = 0;
+    for (let k = startI; k < n; k++) {
+      const proj = startP + slope * (k - startI);
+      const barP = useHigh ? bars[k].high : bars[k].low;
+      if (Math.abs(barP - proj) <= touchTol) cnt++;
+    }
+    return cnt;
+  }
+  function extEnd(si, sp, slope) { return sp + slope * (n - 1 - si); }
+
+  const result = [];
+
+  // ── 1. Uptrend Support (rising lows) ──
+  for (let a = 0; a < allLows.length - 1; a++) {
+    let best = null, bestScore = 1;
+    for (let b = a + 1; b < allLows.length; b++) {
+      const p1 = allLows[a], p2 = allLows[b];
+      if (p2.price <= p1.price * 1.001) continue;
+      if (p2.i - p1.i < 4) continue;
+      const slope = (p2.price - p1.price) / (p2.i - p1.i);
+      if (Math.abs(slope) > priceRange / n * 5) continue;
+      let broken = false;
+      for (let k = p1.i + 1; k < p2.i; k++) {
+        if (bars[k].low < p1.price + slope * (k - p1.i) - touchTol * 2) { broken = true; break; }
+      }
+      if (broken) continue;
+      const t = countTouches(p1.i, p1.price, slope, false);
+      if (t > bestScore) { bestScore = t; best = { p1, slope }; }
+    }
+    if (best) {
+      result.push({ type: 'uptrend', label: 'Uptrend Support', color: '#00E676',
+        lineStyle: 0, lineWidth: 2,
+        startTs: best.p1.ts, startPrice: best.p1.price,
+        endTs: lastTs, endPrice: Math.max(0.01, extEnd(best.p1.i, best.p1.price, best.slope)),
+        touches: bestScore });
+    }
+  }
+
+  // ── 2. Downtrend Resistance (falling highs) ──
+  for (let a = 0; a < allHighs.length - 1; a++) {
+    let best = null, bestScore = 1;
+    for (let b = a + 1; b < allHighs.length; b++) {
+      const p1 = allHighs[a], p2 = allHighs[b];
+      if (p2.price >= p1.price * 0.999) continue;
+      if (p2.i - p1.i < 4) continue;
+      const slope = (p2.price - p1.price) / (p2.i - p1.i);
+      if (Math.abs(slope) > priceRange / n * 5) continue;
+      let broken = false;
+      for (let k = p1.i + 1; k < p2.i; k++) {
+        if (bars[k].high > p1.price + slope * (k - p1.i) + touchTol * 2) { broken = true; break; }
+      }
+      if (broken) continue;
+      const t = countTouches(p1.i, p1.price, slope, true);
+      if (t > bestScore) { bestScore = t; best = { p1, slope }; }
+    }
+    if (best) {
+      result.push({ type: 'downtrend', label: 'Downtrend Resistance', color: '#FF4757',
+        lineStyle: 0, lineWidth: 2,
+        startTs: best.p1.ts, startPrice: best.p1.price,
+        endTs: lastTs, endPrice: Math.max(0.01, extEnd(best.p1.i, best.p1.price, best.slope)),
+        touches: bestScore });
+    }
+  }
+
+  // ── 3. Horizontal Support (clustered pivot lows) ──
+  const lowBuckets = new Map();
+  allLows.forEach(p => {
+    const key = Math.round(p.price / (priceRange * 0.008));
+    if (!lowBuckets.has(key)) lowBuckets.set(key, []);
+    lowBuckets.get(key).push(p);
+  });
+  lowBuckets.forEach(group => {
+    if (group.length < 2) return;
+    const avg = group.reduce((s, p) => s + p.price, 0) / group.length;
+    result.push({ type: 'h_support', label: `Support ×${group.length}`, color: '#3B82F6',
+      lineStyle: 2, lineWidth: 1, startTs: firstTs, startPrice: avg,
+      endTs: lastTs, endPrice: avg, touches: group.length });
+  });
+
+  // ── 4. Horizontal Resistance (clustered pivot highs) ──
+  const highBuckets = new Map();
+  allHighs.forEach(p => {
+    const key = Math.round(p.price / (priceRange * 0.008));
+    if (!highBuckets.has(key)) highBuckets.set(key, []);
+    highBuckets.get(key).push(p);
+  });
+  highBuckets.forEach(group => {
+    if (group.length < 2) return;
+    const avg = group.reduce((s, p) => s + p.price, 0) / group.length;
+    result.push({ type: 'h_resistance', label: `Resistance ×${group.length}`, color: '#FF6B00',
+      lineStyle: 2, lineWidth: 1, startTs: firstTs, startPrice: avg,
+      endTs: lastTs, endPrice: avg, touches: group.length });
+  });
+
+  // ── 5. Channel Lines (parallel to uptrend/downtrend) ──
+  result.filter(l => l.type === 'uptrend').slice(0, 2).forEach(tl => {
+    const si = bars.findIndex(b => b.timestamp / 1000 >= tl.startTs);
+    if (si === -1) return;
+    const slope = (n - 1 - si) > 0 ? (tl.endPrice - tl.startPrice) / (n - 1 - si) : 0;
+    let maxOff = 0;
+    for (let k = si; k < n; k++) {
+      const off = bars[k].high - (tl.startPrice + slope * (k - si));
+      if (off > maxOff) maxOff = off;
+    }
+    if (maxOff > touchTol) {
+      result.push({ type: 'channel_up', label: 'Channel High', color: '#06B6D4',
+        lineStyle: 3, lineWidth: 1,
+        startTs: tl.startTs, startPrice: tl.startPrice + maxOff,
+        endTs: tl.endTs,     endPrice: tl.endPrice + maxOff, touches: 1 });
+    }
+  });
+  result.filter(l => l.type === 'downtrend').slice(0, 2).forEach(tl => {
+    const si = bars.findIndex(b => b.timestamp / 1000 >= tl.startTs);
+    if (si === -1) return;
+    const slope = (n - 1 - si) > 0 ? (tl.endPrice - tl.startPrice) / (n - 1 - si) : 0;
+    let maxOff = 0;
+    for (let k = si; k < n; k++) {
+      const off = (tl.startPrice + slope * (k - si)) - bars[k].low;
+      if (off > maxOff) maxOff = off;
+    }
+    if (maxOff > touchTol) {
+      result.push({ type: 'channel_down', label: 'Channel Low', color: '#EC4899',
+        lineStyle: 3, lineWidth: 1,
+        startTs: tl.startTs, startPrice: tl.startPrice - maxOff,
+        endTs: tl.endTs,     endPrice: tl.endPrice - maxOff, touches: 1 });
+    }
+  });
+
+  // ── 6. Fibonacci Retracement (last 150 bars swing) ──
+  const recentBars = bars.slice(Math.max(0, n - 150));
+  const swH = Math.max(...recentBars.map(b => b.high));
+  const swL = Math.min(...recentBars.map(b => b.low));
+  const fibR = swH - swL;
+  if (fibR > priceRange * 0.05) {
+    [
+      { level: 0.236, color: '#C084FC', label: 'Fib 23.6%' },
+      { level: 0.382, color: '#A78BFA', label: 'Fib 38.2%' },
+      { level: 0.500, color: '#818CF8', label: 'Fib 50.0%' },
+      { level: 0.618, color: '#6366F1', label: 'Fib 61.8%' },
+      { level: 0.786, color: '#4F46E5', label: 'Fib 78.6%' },
+    ].forEach(f => {
+      const price = swL + fibR * (1 - f.level);
+      result.push({ type: 'fibonacci', label: f.label, color: f.color,
+        lineStyle: 1, lineWidth: 1, startTs: firstTs, startPrice: price,
+        endTs: lastTs, endPrice: price, touches: 0 });
+    });
+  }
+
+  // Limit per type (avoid chart clutter)
+  const typeCount = {};
+  const MAX_PER_TYPE = { h_support: 3, h_resistance: 3, uptrend: 3, downtrend: 3,
+    fibonacci: 5, channel_up: 2, channel_down: 2 };
+  return result.filter(l => {
+    typeCount[l.type] = (typeCount[l.type] ?? 0) + 1;
+    return typeCount[l.type] <= (MAX_PER_TYPE[l.type] ?? 3);
+  });
+}
+
 // ── SMC Auto Mark: compute FVG / Liquidity / Order Blocks ─────────
 function computeSMCData(bars) {
   const n = bars.length;
@@ -599,6 +785,20 @@ const ChartPanel = ({
       });
       gannLineSeriesRef.current = [];
     }
+  };
+
+  // ── Trendline refs + clear ──────────────────────────────────────
+  const trendLineSeriesRef = useRef([]);
+  const [trendlinesActive, setTrendlinesActive] = useState(false);
+  const [trendlineCount, setTrendlineCount] = useState(0);
+
+  const clearTrendLines = () => {
+    if (chartRef.current && trendLineSeriesRef.current.length > 0) {
+      trendLineSeriesRef.current.forEach(s => {
+        try { chartRef.current.removeSeries(s); } catch (e) {}
+      });
+    }
+    trendLineSeriesRef.current = [];
   };
 
   // ── MTF Direction fetch (1H / 45M / 15M) ──────────────────────
@@ -1405,6 +1605,7 @@ const ChartPanel = ({
       if (handleResize) window.removeEventListener('resize', handleResize);
       if (roInst) roInst.disconnect();
       clearGannLines();
+      clearTrendLines();
       if (chartInst) chartInst.remove();
       // Null out refs so animation loops & other effects don't call into a disposed chart
       chartRef.current = null;
@@ -1508,6 +1709,36 @@ const ChartPanel = ({
       if (ema21SeriesRef.current) ema21SeriesRef.current.applyOptions({ visible: emaActive });
     } catch (e) { /* series may be disposed */ }
   }, [emaActive]);
+
+  // ── Auto Trendlines — draw / clear on toggle or stock change ───
+  useEffect(() => {
+    clearTrendLines();
+    if (!trendlinesActive || !chartRef.current || !stockData?.bars?.length) {
+      setTrendlineCount(0);
+      return;
+    }
+    const lines = detectTrendlines(stockData.bars);
+    setTrendlineCount(lines.length);
+    lines.forEach(line => {
+      try {
+        const s = chartRef.current.addLineSeries({
+          color: line.color,
+          lineWidth: line.lineWidth,
+          lineStyle: line.lineStyle,
+          priceLineVisible: false,
+          lastValueVisible: false,
+          crosshairMarkerVisible: false,
+          title: line.label,
+        });
+        s.setData([
+          { time: line.startTs, value: line.startPrice },
+          { time: line.endTs,   value: line.endPrice   },
+        ]);
+        trendLineSeriesRef.current.push(s);
+      } catch (e) {}
+    });
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [stockData, trendlinesActive]);
 
   // ── MTF Direction fetch — triggers when stock changes ─────────
   useEffect(() => {
@@ -1845,6 +2076,19 @@ const ChartPanel = ({
             title="Candlestick patterns — Yellow: Bullish reversal · Orange: Bearish reversal · Blue: Continuation"
           >
             PATTERNS
+          </button>
+          {/* Auto Trendlines — one-click detect all trendline types */}
+          <button
+            onClick={() => setTrendlinesActive(v => !v)}
+            className={`px-2 py-1 text-[10px] font-bold uppercase tracking-wider transition-all whitespace-nowrap shrink-0 border ${
+              trendlinesActive
+                ? 'text-[#00BCD4] border-[#00BCD4]/40 bg-[#00BCD4]/10'
+                : 'text-zinc-500 border-transparent'
+            }`}
+            data-testid="trendlines-toggle"
+            title="Auto Trendlines — Uptrend, Downtrend, H-Support, H-Resistance, Channel, Fibonacci"
+          >
+            TREND{trendlinesActive && trendlineCount > 0 ? ` ·${trendlineCount}` : ''}
           </button>
           {/* Volume Profile toggle — POC, VAH, VAL auto-mark */}
           <button
@@ -2196,6 +2440,23 @@ const ChartPanel = ({
               ({lastPattern.category === 'bullish-reversal' ? 'BUY' :
                 lastPattern.category === 'bearish-reversal' ? 'SELL' : 'CONT'}{lastPattern.barsAgo > 0 ? ` · ${lastPattern.barsAgo} ago` : ''})
             </span>
+          </div>
+        )}
+
+        {/* Trendline Legend Badge — bottom-left when active */}
+        {trendlinesActive && trendlineCount > 0 && (
+          <div
+            className="absolute bottom-12 left-2 z-20 px-2 py-1 rounded text-[9px] font-bold border backdrop-blur-sm"
+            style={{ background: 'rgba(6,182,212,0.12)', borderColor: 'rgba(6,182,212,0.35)', color: '#06B6D4' }}
+            data-testid="trendlines-badge"
+          >
+            <span style={{ color: '#00E676' }}>━</span> Uptrend &nbsp;
+            <span style={{ color: '#FF4757' }}>━</span> Downtrend &nbsp;
+            <span style={{ color: '#3B82F6' }}>┄</span> Support &nbsp;
+            <span style={{ color: '#FF6B00' }}>┄</span> Resistance &nbsp;
+            <span style={{ color: '#06B6D4' }}>┅</span> Channel &nbsp;
+            <span style={{ color: '#818CF8' }}>·</span> Fib &nbsp;
+            <span className="text-white/40">({trendlineCount} lines)</span>
           </div>
         )}
 

@@ -302,6 +302,27 @@ Clone trading app → Add dark/light mode, mobile responsiveness, MiroFish LangG
 
 ---
 
+## Update (Feb 2026) — Auto Trendline Detection (One-Click)
+
+**Feature**: TREND button in chart toolbar — one click auto-detects all trendline types.
+
+**Types detected** (all drawn simultaneously):
+- **Uptrend Support** (green solid) — Rising pivot lows connected
+- **Downtrend Resistance** (red solid) — Falling pivot highs connected  
+- **Horizontal Support** (blue dashed) — Clustered pivot lows at same price level
+- **Horizontal Resistance** (orange dashed) — Clustered pivot highs at same price level
+- **Ascending Channel** (cyan dotted) — Parallel line above uptrend
+- **Descending Channel** (pink dotted) — Parallel line below downtrend
+- **Fibonacci Retracement** (violet dotted) — 23.6%, 38.2%, 50%, 61.8%, 78.6% from last 150-bar swing
+
+**Algorithm**: Adaptive pivot window (W = n/25), slope validation, broken-line check, touch-count scoring, max 3 lines per type (5 for Fib).
+
+**UI**: TREND button (cyan when active), shows count `TREND ·16`. Legend badge at bottom-left.
+
+**File**: ChartPanel.jsx — `detectTrendlines()` function added above component.
+
+---
+
 ## Update (Feb 2026) — Black-Scholes Option Calculator + IV Solver
 
 **New Component**: `BlackScholesPanel.jsx` + `/api/black-scholes/calculate` + `/api/black-scholes/iv-solver`
