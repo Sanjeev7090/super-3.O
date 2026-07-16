@@ -755,12 +755,19 @@ async def get_stock_bars(
     """Get historical OHLCV data using yfinance"""
     try:
         # yfinance valid intervals: 1m, 2m, 5m, 15m, 30m, 60m, 90m, 1h, 4h, 1d, 5d, 1wk, 1mo, 3mo
-        # Note: 10m is NOT supported by yfinance, so we map it to 15m (closest supported)
+        # Map every frontend (multiplier, timespan) combo to a supported yfinance interval.
+        # Combos not directly supported (3m, 10m, 45m, 2h) map to closest available interval.
         interval_map = {
             (1, "minute"): "1m",
-            (10, "minute"): "15m",  # 10m not supported, use 15m instead
+            (2, "minute"): "2m",
+            (3, "minute"): "5m",    # yfinance has no 3m — use 5m
+            (5, "minute"): "5m",
+            (10, "minute"): "15m",  # yfinance has no 10m — use 15m
+            (15, "minute"): "15m",
             (30, "minute"): "30m",
+            (45, "minute"): "30m",  # yfinance has no 45m — use 30m
             (1, "hour"): "1h",
+            (2, "hour"): "1h",      # yfinance has no 2h — use 1h
             (4, "hour"): "4h",
             (1, "day"): "1d",
             (1, "week"): "1wk",
