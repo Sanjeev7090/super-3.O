@@ -197,14 +197,21 @@ function ChartSlot({ slot, onUpdate, isCompact, onOpenOptionChain }) {
           const sym = ticker.replace('.NS','').replace('.BO','').replace(/^\^/,'');
           const interval  = GROWW_INTV_MAP[tf.label] || '1d';
           const days_back = GROWW_DAYS_MAP[tf.label] || 120;
+          let growwBars = [];
           try {
             const res = await axios.get(`${API}/groww/candles/${sym}`, {
               params: { interval, days_back }
             });
-            data = { ticker, bars: res.data.bars || [] };
+            growwBars = res.data.bars || [];
           } catch {
+            growwBars = [];
+          }
+          if (growwBars.length > 0) {
+            data = { ticker, bars: growwBars };
+          } else {
+            // Groww returned empty (e.g., indices) — fall back to yfinance
             const res = await axios.get(`${API}/stock/bars/${ticker}`, {
-              params: { timespan: tf.timespan, multiplier: tf.multiplier, limit: 200 }
+              params: { timespan: tf.timespan, multiplier: tf.multiplier, ...(tf.days ? { days: tf.days } : {}), limit: 200 }
             });
             data = res.data;
           }

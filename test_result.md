@@ -599,3 +599,24 @@ agent_communication:
       - working: "NA"
         agent: "main"
         comment: "New component: MultiChartLayout.jsx. Layout switcher with 1/2/4 charts. Each slot has independent stock search + ChartPanel. Slot-1 synced with sidebar. Frontend compiled clean."
+
+  - task: "Nifty 50 timeframe change - candles not showing (Groww empty bars + missing yfinance interval mappings)"
+    implemented: true
+    working: true
+    file: "backend/server.py, frontend/src/components/TradingDashboard.jsx, frontend/src/components/MultiChartLayout.jsx"
+    stuck_count: 0
+    priority: "high"
+    needs_retesting: false
+    status_history:
+      - working: "NA"
+        agent: "main"
+        comment: "Bug: When switching timeframes on Nifty 50 (^NSEI), chart shows no candles. Two root causes fixed. (1) BACKEND server.py get_stock_bars interval_map was incomplete — combos (2,minute), (3,minute), (5,minute), (15,minute), (45,minute), (2,hour) silently fell back to 1d, returning daily bars for intraday TFs. Fixed by expanding interval_map to cover all frontend TF combos with closest yfinance-supported interval. (2) FRONTEND default dataSource is 'groww' but /api/groww/candles/NSEI returns HTTP 200 with empty bars array (indices not on Groww). Both TradingDashboard.fetchStockData and MultiChartLayout.fetchData accepted empty bars without falling back to yfinance. Fixed by checking bars.length===0 after groww call and falling back to /api/stock/bars/^NSEI yfinance endpoint. Backend restarted, frontend hot-reloaded, compiled clean."
+      - working: true
+        agent: "testing"
+        comment: "VERIFIED: All 16 tests PASSED. (1) Root API health check: GET /api/ returns 200 with 'Gann Angles Trader API - NSE Edition' ✓ (2) All 13 Nifty 50 timeframe combos tested with ^NSEI: 1m (2620 bars, 0.02h spacing), 2m (6200 bars, 0.03h), 3m→5m (4275 bars, 0.08h), 5m (4275 bars, 0.08h), 10m→15m (1425 bars, 0.25h), 15m (1425 bars, 0.25h), 30m (741 bars, 0.50h), 45m→30m (741 bars, 0.50h), 1h (5057 bars, 1.00h), 2h→1h (5057 bars, 1.00h), 4h (1446 bars, 4.00h), 1d (79 bars), 1w (18 bars). All intraday combos confirmed with timestamp spacing < 24h (not daily fallback). All newly fixed combos (2m, 3m, 5m, 15m, 45m, 2h) working correctly ✓ (3) Order Flow with zero-volume bars: POST /api/orderflow/analyze with all volumes=0 returns non-empty footprint (12 items) and vp_bins (24 items), confirming synthetic-volume fallback works ✓ (4) Groww NSEI endpoint: GET /api/groww/candles/NSEI returns HTTP 200 with empty bars (expected for indices) ✓ Bug fix fully verified and working."
+
+agent_communication:
+  - agent: "main"
+    message: "Fixed Nifty 50 timeframe bug (candles not showing). Backend fix: expanded interval_map in /api/stock/bars/{ticker} to include (2,minute), (3,minute), (5,minute), (15,minute), (45,minute), (2,hour). Frontend fix: TradingDashboard.fetchStockData and MultiChartLayout.fetchData now fall back to yfinance /api/stock/bars when groww returns empty bars (indices are not on Groww). Please verify: GET /api/stock/bars/^NSEI with (multiplier,timespan) combos = (1,minute),(2,minute),(3,minute),(5,minute),(10,minute),(15,minute),(30,minute),(45,minute),(1,hour),(2,hour),(4,hour),(1,day),(1,week) each returns HTTP 200 with bars array of len >= 15 and intraday timestamps for minute/hour TFs (i.e., ts spacing should be < 24h for intraday). Also verify /api/groww/candles/NSEI returns 200 (may have empty bars — that's OK, frontend handles it)."
+  - agent: "testing"
+    message: "Nifty 50 timeframe bug fix FULLY VERIFIED. Created and ran comprehensive test suite (nifty_timeframe_test.py) covering all 4 test requirements: (1) Root API health check ✓ (2) All 13 timeframe combinations for ^NSEI with HTTP 200, bars >= 15, and intraday timestamp spacing verification ✓ (3) Order Flow analysis with zero-volume bars returning non-empty footprint and vp_bins ✓ (4) Groww NSEI candles endpoint returning HTTP 200 ✓ All 16 tests passed. The interval_map expansion is working correctly - all newly fixed combos (2m, 3m, 5m, 15m, 45m, 2h) now return proper intraday data instead of falling back to daily. No issues found. Bug fix is production-ready."

@@ -193,12 +193,23 @@ const TradingDashboard = () => {
           const response = await axios.get(`${API}/groww/candles/${groww_symbol}`, {
             params: { interval, days_back: days, exchange }
           });
-          setStockData({ ticker, bars: response.data.bars || [] });
+          const growwBars = response.data.bars || [];
+          if (growwBars.length === 0) {
+            // Groww returned empty (e.g., for indices) — fall back to yfinance
+            throw new Error('Groww returned no bars');
+          }
+          setStockData({ ticker, bars: growwBars });
           const src_label = response.data.source === 'yfinance_fallback' ? 'yfinance' : 'Groww';
           toast.success(`Loaded ${tf.label} (${src_label}) for ${groww_symbol}`);
         } catch (growwErr) {
-          // Groww failed → silent fallback to yfinance
+          // Groww failed or empty → silent fallback to yfinance
           const params = { timespan: tf.timespan, multiplier: tf.multiplier, limit: 120 };
+          if (tf.days) {
+            const fromDate = new Date();
+            fromDate.setDate(fromDate.getDate() - tf.days);
+            params.from_date = fromDate.toISOString().split('T')[0];
+            params.to_date = new Date().toISOString().split('T')[0];
+          }
           const response = await axios.get(`${API}/stock/bars/${ticker}`, { params });
           setStockData(response.data);
           toast.success(`Loaded ${tf.label} (yfinance) for ${ticker}`);
