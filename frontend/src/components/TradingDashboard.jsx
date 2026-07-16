@@ -17,7 +17,7 @@ import SMCAnalysis from './SMCAnalysis';
 import AMDSAnalysis from './AMDSAnalysis';
 import MiroFishAnalysis from './MiroFishAnalysis';
 import PACSOAnalysis from './PACSOAnalysis';
-import StockNewsPopup from './StockNewsPopup';
+import MarketIntelPanel from './MarketIntelPanel';
 import HybridDashboard from './hybrid/HybridDashboard';
 import GannQSCPanel from './GannQSCPanel';
 import AdvanceDeclineTicker from './AdvanceDeclineTicker';
@@ -608,16 +608,15 @@ const TradingDashboard = () => {
             <StockSearch onStockSelect={handleStockSelect} selectedStock={selectedStock} />
           </div>
 
-          {selectedStock && !isCrypto && !isOption && (
-            <button
-              onClick={() => setShowNews(true)}
-              className="p-1.5 rounded-md border border-slate-200 dark:border-white/10 text-sky-500 hover:bg-slate-100 dark:hover:bg-white/10 transition-all"
-              title="View News"
-              data-testid="news-btn"
-            >
-              <Newspaper size={15} />
-            </button>
-          )}
+          {/* Market Intelligence button — always visible */}
+          <button
+            onClick={() => setShowNews(true)}
+            className="p-1.5 rounded-md border border-slate-200 dark:border-white/10 text-sky-500 hover:bg-slate-100 dark:hover:bg-white/10 transition-all"
+            title="Market Intelligence"
+            data-testid="news-btn"
+          >
+            <Newspaper size={15} />
+          </button>
 
           {/* RL AGENT BACKGROUND TRAINING INDICATOR — jumps into Settings drawer */}
           {rlStatus?.status === 'training' && (
@@ -920,10 +919,9 @@ const TradingDashboard = () => {
         }}
       />
 
-      {/* News Popup */}
-      {showNews && selectedStock && !isCrypto && !isOption && (
-        <StockNewsPopup
-          ticker={selectedStock.ticker}
+      {/* Market Intelligence Panel */}
+      {showNews && (
+        <MarketIntelPanel
           onClose={() => setShowNews(false)}
         />
       )}

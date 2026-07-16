@@ -6,5 +6,7 @@
 3. Just implement the task as asked, no verification via screenshots or testing agents.
 
 ## Current Task
-- Clone https://github.com/Sanjeev7090/super-3.O exactly as-is into /app (replacing existing content).
-- Preserve /app/.git, /app/.emergent, /app/memory folders.
+- Market Intelligence panel replacing Stock News popup
+- News icon always visible in header (not stock-specific)
+- Shows live: Brent Crude, India VIX, Nifty, GIFT Nifty, Regulatory sentiment
+- Applies decision matrix → outputs Bias, Expected Move, Probability, Action

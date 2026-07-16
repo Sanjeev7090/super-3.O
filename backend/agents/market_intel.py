@@ -1,0 +1,528 @@
+"""
+Market Intelligence Engine
+==========================
+Fetches live macro data and applies decision matrix to determine Nifty bias.
+
+Data Sources (all free, no API key):
+  - Brent Crude    : yfinance BZ=F (ICE Brent Crude Futures)
+  - India VIX      : yfinance ^INDIAVIX
+  - Nifty Spot     : yfinance ^NSEI
+  - GIFT Nifty     : yfinance NIFTYIFTB.NS (fallback: estimate from ^GSPC futures)
+  - S&P 500 Futures: yfinance ES=F (global cues proxy)
+  - Regulatory     : SEBI / NSE RSS via aiohttp (keyword sentiment)
+
+Decision Matrix:
+  Strong Bullish : Brent < 82, VIX < 14, Positive regulatory, GIFT Green   → +300 to +600 pts
+  Mild Bullish   : Brent 80-83, VIX 13-15, Neutral, GIFT Mild Green        → +150 to +350 pts
+  Neutral        : Brent 82-85, VIX 14-16, Neutral, GIFT Flat              → -150 to +150 pts
+  Mild Bearish   : Brent 85+,  VIX 15+,  Neutral, GIFT Red                → -150 to -350 pts
+  Strong Bearish : Brent 87+,  VIX 16+,  Negative, GIFT Strong Red        → -400 to -800 pts
+"""
+
+from __future__ import annotations
+
+import asyncio
+import logging
+from datetime import datetime, timezone, timedelta
+from typing import Dict, Any, Optional
+
+logger = logging.getLogger(__name__)
+
+_cache: Dict[str, Any] = {}
+CACHE_TTL = 900  # 15 minutes
+
+
+# ── Bias Levels ────────────────────────────────────────────────────────────────
+
+BIAS_LEVELS = [
+    {
+        "label": "Strong Bullish",
+        "score_min": 2.5,
+        "score_max": 99,
+        "move_label": "+300 to +600 pts",
+        "move_min": 300,
+        "move_max": 600,
+        "probability": "High",
+        "action": "Aggressive Long (Energy + Banking)",
+        "color": "#22c55e",
+        "gift_color": "Green",
+        "brent_ref": "< $82",
+        "vix_ref": "< 14",
+        "regulatory_ref": "Positive",
+    },
+    {
+        "label": "Mild Bullish",
+        "score_min": 0.8,
+        "score_max": 2.5,
+        "move_label": "+150 to +350 pts",
+        "move_min": 150,
+        "move_max": 350,
+        "probability": "Medium-High",
+        "action": "Selective Long",
+        "color": "#86efac",
+        "gift_color": "Mild Green",
+        "brent_ref": "$80-83",
+        "vix_ref": "13-15",
+        "regulatory_ref": "Neutral",
+    },
+    {
+        "label": "Neutral",
+        "score_min": -0.5,
+        "score_max": 0.8,
+        "move_label": "-150 to +150 pts (Sideways)",
+        "move_min": -150,
+        "move_max": 150,
+        "probability": "High",
+        "action": "Range trading, small positions",
+        "color": "#94a3b8",
+        "gift_color": "Flat",
+        "brent_ref": "$82-85",
+        "vix_ref": "14-16",
+        "regulatory_ref": "Neutral",
+    },
+    {
+        "label": "Mild Bearish",
+        "score_min": -2.0,
+        "score_max": -0.5,
+        "move_label": "-150 to -350 pts",
+        "move_min": -350,
+        "move_max": -150,
+        "probability": "High",
+        "action": "Selective Energy Long, Profit booking",
+        "color": "#fca5a5",
+        "gift_color": "Red/Mild Red",
+        "brent_ref": "$85+",
+        "vix_ref": "15+",
+        "regulatory_ref": "Neutral",
+    },
+    {
+        "label": "Strong Bearish",
+        "score_min": -99,
+        "score_max": -2.0,
+        "move_label": "-400 to -800 pts",
+        "move_min": -800,
+        "move_max": -400,
+        "probability": "Medium",
+        "action": "Hedging, Cash increase",
+        "color": "#ef4444",
+        "gift_color": "Strong Red",
+        "brent_ref": "$87+",
+        "vix_ref": "16+",
+        "regulatory_ref": "Negative",
+    },
+]
+
+
+# ── Scoring ────────────────────────────────────────────────────────────────────
+
+def _score_brent(brent: float) -> float:
+    if brent < 80:
+        return 2.5
+    elif brent < 82:
+        return 2.0
+    elif brent < 84:
+        return 1.0
+    elif brent < 86:
+        return 0.0
+    elif brent < 88:
+        return -1.0
+    else:
+        return -2.0
+
+
+def _score_vix(vix: float) -> float:
+    if vix < 12:
+        return 1.5
+    elif vix < 14:
+        return 1.0
+    elif vix < 15:
+        return 0.5
+    elif vix < 16:
+        return 0.0
+    elif vix < 18:
+        return -0.5
+    elif vix < 20:
+        return -1.0
+    else:
+        return -1.5
+
+
+def _score_regulatory(sentiment: str) -> float:
+    mapping = {"Positive": 1.0, "Neutral": 0.0, "Negative": -1.5}
+    return mapping.get(sentiment, 0.0)
+
+
+def _score_gift(gift_premium: float) -> float:
+    """Gift Nifty premium over spot Nifty → score."""
+    if gift_premium > 80:
+        return 1.0
+    elif gift_premium > 20:
+        return 0.5
+    elif gift_premium > -20:
+        return 0.0
+    elif gift_premium > -80:
+        return -0.5
+    else:
+        return -1.0
+
+
+def _determine_bias(score: float) -> Dict:
+    for level in BIAS_LEVELS:
+        if level["score_min"] <= score < level["score_max"]:
+            return level
+    return BIAS_LEVELS[2]  # default neutral
+
+
+# ── Regulatory Sentiment ───────────────────────────────────────────────────────
+
+REGULATORY_RSS = [
+    "https://www.sebi.gov.in/sebirss.aspx",
+    "https://www.nseindia.com/rss/circulars.xml",
+]
+
+NEGATIVE_KEYWORDS = [
+    "ban", "banned", "suspend", "suspended", "penalty", "penalise", "penalize",
+    "violation", "fraud", "crackdown", "restrict", "restriction", "probe",
+    "investigation", "order", "seized", "action against", "barred",
+]
+POSITIVE_KEYWORDS = [
+    "relief", "relaxed", "ease", "approve", "approved", "launch",
+    "new scheme", "benefit", "positive", "reform", "deregulate",
+]
+
+
+async def _fetch_regulatory_sentiment() -> str:
+    """Return Positive / Neutral / Negative based on recent SEBI/NSE news."""
+    try:
+        import aiohttp
+        async with aiohttp.ClientSession() as session:
+            for url in REGULATORY_RSS:
+                try:
+                    async with session.get(url, timeout=aiohttp.ClientTimeout(total=5)) as r:
+                        if r.status == 200:
+                            text = (await r.text()).lower()
+                            neg = sum(1 for k in NEGATIVE_KEYWORDS if k in text)
+                            pos = sum(1 for k in POSITIVE_KEYWORDS if k in text)
+                            if neg > pos + 1:
+                                return "Negative"
+                            elif pos > neg:
+                                return "Positive"
+                            return "Neutral"
+                except Exception:
+                    continue
+    except Exception as e:
+        logger.debug(f"Regulatory RSS failed: {e}")
+    return "Neutral"
+
+
+# ── GIFT Nifty Fetch ───────────────────────────────────────────────────────────
+
+def _fetch_gift_nifty(nifty_price: float) -> float:
+    """
+    Attempt to fetch GIFT Nifty from yfinance.
+    Fallback: estimate using S&P 500 / Dow futures change%.
+    """
+    import yfinance as yf
+
+    # Try NSE IFSC direct ticker
+    for ticker in ["NIFTYIFTB.NS", "^NIFTYIFTB"]:
+        try:
+            info = yf.Ticker(ticker).fast_info
+            price = getattr(info, "last_price", None)
+            if price and price > 1000:
+                return float(price)
+        except Exception:
+            pass
+
+    # Fallback: Use S&P 500 futures % change as global cue proxy
+    try:
+        info = yf.Ticker("ES=F").fast_info
+        prev_close = getattr(info, "previous_close", None)
+        curr = getattr(info, "last_price", None)
+        if prev_close and curr and prev_close > 0:
+            sp_chg_pct = (curr - prev_close) / prev_close
+            # GIFT Nifty roughly tracks 50-60% of S&P moves for Indian context
+            estimated_premium = nifty_price * sp_chg_pct * 0.55
+            return nifty_price + estimated_premium
+    except Exception as e:
+        logger.debug(f"S&P futures fallback for GIFT Nifty failed: {e}")
+
+    # Last fallback — return spot with zero premium
+    return nifty_price
+
+
+# ── VIX 52-week History ────────────────────────────────────────────────────────
+
+def _fetch_vix_history() -> Dict:
+    """Fetch India VIX 52-week high/low from yfinance history."""
+    import yfinance as yf
+    try:
+        hist = yf.Ticker("^INDIAVIX").history(period="1y")
+        if hist.empty:
+            return {}
+        closes = hist["Close"].dropna()
+        return {
+            "vix_52w_high": round(float(closes.max()), 2),
+            "vix_52w_low":  round(float(closes.min()), 2),
+        }
+    except Exception as e:
+        logger.debug(f"VIX 52w history fetch failed: {e}")
+        return {}
+
+
+def _calc_vix_percentile(vix: float, low: float, high: float) -> float:
+    if not low or not high or high == low:
+        return 50.0
+    pct = (vix - low) / (high - low) * 100
+    return round(max(0.0, min(100.0, pct)), 1)
+
+
+# ── Expiry Countdown ──────────────────────────────────────────────────────────
+
+def _next_expiry_info() -> Dict:
+    """
+    Next weekly options expiry countdown (IST timezone).
+    NIFTY  weekly expiry : every Thursday  3:30 PM IST
+    BANKNIFTY weekly     : every Wednesday 3:30 PM IST
+    """
+
+    IST = timezone(timedelta(hours=5, minutes=30))
+    now_ist = datetime.now(IST)
+
+    result = {}
+    for name, weekday in [("NIFTY", 3), ("BANKNIFTY", 2)]:  # Thu=3, Wed=2
+        days_ahead = (weekday - now_ist.weekday()) % 7
+        expiry_base = now_ist.replace(hour=15, minute=30, second=0, microsecond=0)
+
+        if days_ahead == 0 and now_ist >= expiry_base:
+            days_ahead = 7  # today's expiry already passed → next week
+
+        expiry_dt = expiry_base + timedelta(days=days_ahead)
+        delta     = expiry_dt - now_ist
+        total_sec = max(0, int(delta.total_seconds()))
+
+        days    = total_sec // 86400
+        hours   = (total_sec % 86400) // 3600
+        minutes = (total_sec % 3600) // 60
+
+        result[name] = {
+            "days":        days,
+            "hours":       hours,
+            "minutes":     minutes,
+            "expiry_date": expiry_dt.strftime("%d %b %Y"),
+            "is_today":    days == 0,
+        }
+
+    return result
+
+
+# ── VIX 52-week History ────────────────────────────────────────────────────────
+
+def _fetch_vix_history() -> Dict:
+    """Fetch India VIX 52-week high/low from yfinance history."""
+    import yfinance as yf
+    try:
+        hist = yf.Ticker("^INDIAVIX").history(period="1y")
+        if hist.empty:
+            return {}
+        closes = hist["Close"].dropna()
+        return {
+            "vix_52w_high": round(float(closes.max()), 2),
+            "vix_52w_low":  round(float(closes.min()), 2),
+        }
+    except Exception as e:
+        logger.debug(f"VIX 52w history fetch failed: {e}")
+        return {}
+
+
+def _calc_vix_percentile(vix: float, low: float, high: float) -> float:
+    if not low or not high or high == low:
+        return 50.0
+    pct = (vix - low) / (high - low) * 100
+    return round(max(0.0, min(100.0, pct)), 1)
+
+
+# ── Expiry Countdown ──────────────────────────────────────────────────────────
+
+def _next_expiry_info() -> Dict:
+    """
+    Next weekly options expiry countdown (IST timezone).
+    NIFTY  weekly expiry : every Thursday  3:30 PM IST
+    BANKNIFTY weekly     : every Wednesday 3:30 PM IST
+    """
+
+    IST = timezone(timedelta(hours=5, minutes=30))
+    now_ist = datetime.now(IST)
+
+    result = {}
+    for name, weekday in [("NIFTY", 3), ("BANKNIFTY", 2)]:  # Thu=3, Wed=2
+        days_ahead = (weekday - now_ist.weekday()) % 7
+        expiry_base = now_ist.replace(hour=15, minute=30, second=0, microsecond=0)
+
+        if days_ahead == 0 and now_ist >= expiry_base:
+            days_ahead = 7  # today's expiry already passed → next week
+
+        expiry_dt = expiry_base + timedelta(days=days_ahead)
+        delta     = expiry_dt - now_ist
+        total_sec = max(0, int(delta.total_seconds()))
+
+        days    = total_sec // 86400
+        hours   = (total_sec % 86400) // 3600
+        minutes = (total_sec % 3600) // 60
+
+        result[name] = {
+            "days":        days,
+            "hours":       hours,
+            "minutes":     minutes,
+            "expiry_date": expiry_dt.strftime("%d %b %Y"),
+            "is_today":    days == 0,
+        }
+
+    return result
+
+
+# ── Main Fetch ─────────────────────────────────────────────────────────────────
+
+def _fetch_yf_prices() -> Dict[str, float]:
+    """Synchronous yfinance multi-ticker fetch."""
+    import yfinance as yf
+
+    results: Dict[str, float] = {}
+    tickers_map = {
+        "BZ=F": "brent",
+        "^INDIAVIX": "vix",
+        "^NSEI": "nifty",
+    }
+    for sym, key in tickers_map.items():
+        try:
+            info = yf.Ticker(sym).fast_info
+            price = getattr(info, "last_price", None)
+            prev  = getattr(info, "previous_close", None)
+            if price:
+                results[key] = float(price)
+                if prev and prev > 0:
+                    results[f"{key}_prev"] = float(prev)
+                    results[f"{key}_chg_pct"] = round((price - prev) / prev * 100, 2)
+        except Exception as e:
+            logger.debug(f"yfinance fetch failed for {sym}: {e}")
+
+    return results
+
+
+async def fetch_market_intel() -> Dict:
+    """Public API — returns full market intelligence dict."""
+    now = datetime.now(timezone.utc)
+
+    cached = _cache.get("intel")
+    if cached and (now - cached["ts"]).total_seconds() < CACHE_TTL:
+        return cached["data"]
+
+    loop = asyncio.get_event_loop()
+
+    # Parallel fetch: yfinance (sync in executor) + regulatory (async)
+    yf_task  = loop.run_in_executor(None, _fetch_yf_prices)
+    reg_task = asyncio.ensure_future(_fetch_regulatory_sentiment())
+
+
+    yf_data    = await yf_task
+    regulatory = await reg_task
+
+    # Extract values with safe defaults
+    brent = yf_data.get("brent", 85.0)
+    vix   = yf_data.get("vix",   15.0)
+    nifty = yf_data.get("nifty", 24000.0)
+
+    brent_chg = yf_data.get("brent_chg_pct", 0.0)
+    vix_chg   = yf_data.get("vix_chg_pct", 0.0)
+    nifty_chg = yf_data.get("nifty_chg_pct", 0.0)
+
+    # GIFT Nifty + VIX history + expiry (parallel executor tasks)
+    gift_task    = loop.run_in_executor(None, _fetch_gift_nifty, nifty)
+    vix_hist_task = loop.run_in_executor(None, _fetch_vix_history)
+
+    gift_nifty, vix_hist = await asyncio.gather(gift_task, vix_hist_task)
+
+    # Expiry countdown (pure datetime math, no I/O)
+    expiry_info = _next_expiry_info()
+
+    gift_premium = round(gift_nifty - nifty, 1)
+
+    # VIX percentile
+    vix_52w_high = vix_hist.get("vix_52w_high", 0.0)
+    vix_52w_low  = vix_hist.get("vix_52w_low",  0.0)
+    vix_percentile = _calc_vix_percentile(vix, vix_52w_low, vix_52w_high)
+
+    # VIX zone label
+    if vix_percentile >= 75:
+        vix_zone = "Extreme Fear"
+        vix_zone_color = "#ef4444"
+    elif vix_percentile >= 50:
+        vix_zone = "Elevated"
+        vix_zone_color = "#f97316"
+    elif vix_percentile >= 25:
+        vix_zone = "Moderate"
+        vix_zone_color = "#eab308"
+    else:
+        vix_zone = "Low / Calm"
+        vix_zone_color = "#22c55e"
+
+    # Scoring
+    brent_score = _score_brent(brent)
+    vix_score   = _score_vix(vix)
+    reg_score   = _score_regulatory(regulatory)
+    gift_score  = _score_gift(gift_premium)
+    total_score = round(brent_score + vix_score + reg_score + gift_score, 2)
+
+    bias = _determine_bias(total_score)
+
+    data = {
+        # Live values
+        "brent":           round(brent, 2),
+        "brent_chg_pct":   brent_chg,
+        "vix":             round(vix, 2),
+        "vix_chg_pct":     vix_chg,
+        "nifty":           round(nifty, 2),
+        "nifty_chg_pct":   nifty_chg,
+        "gift_nifty":      round(gift_nifty, 2),
+        "gift_premium":    gift_premium,
+        "regulatory":      regulatory,
+
+        # VIX 52-week
+        "vix_52w_high":    vix_52w_high,
+        "vix_52w_low":     vix_52w_low,
+        "vix_percentile":  vix_percentile,
+        "vix_zone":        vix_zone,
+        "vix_zone_color":  vix_zone_color,
+
+        # Expiry countdown
+        "expiry": expiry_info,
+
+        # Decision output
+        "bias":            bias["label"],
+        "bias_color":      bias["color"],
+        "move_label":      bias["move_label"],
+        "move_min":        bias["move_min"],
+        "move_max":        bias["move_max"],
+        "probability":     bias["probability"],
+        "action":          bias["action"],
+        "gift_color_label":bias["gift_color"],
+
+        # Factor scores
+        "scores": {
+            "brent":      brent_score,
+            "vix":        vix_score,
+            "regulatory": reg_score,
+            "gift":       gift_score,
+            "total":      total_score,
+        },
+
+        # Full matrix for frontend display
+        "matrix": BIAS_LEVELS,
+
+        "updated_at": now.isoformat(),
+    }
+
+    _cache["intel"] = {"data": data, "ts": now}
+    return data
+
+ 

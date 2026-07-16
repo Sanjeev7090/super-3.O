@@ -11611,24 +11611,29 @@ async def websocket_crypto_stream(websocket: WebSocket):
         logging.debug(f"Crypto WS client disconnect: {e}")
 
 
-# ======================= STOCK NEWS (RSS-based) =======================
+# ======================= MARKET INTELLIGENCE =======================
 
-@api_router.get("/news/{ticker}")
-async def get_stock_news(ticker: str):
-    """Fetch latest news for a stock using multi-source RSS (ET, Google News)"""
-    cache_key = f"news_rss_{ticker}"
-    cached = cache_storage.get(cache_key)
-    if cached and (datetime.now(timezone.utc) - cached['ts']).total_seconds() < 600:
-        return cached['data']
+@api_router.get("/market-intel")
+async def get_market_intel():
+    """
+    Market Intelligence — Live macro data + Nifty bias decision matrix.
+    Fetches: Brent Crude, India VIX, Nifty, GIFT Nifty, Regulatory sentiment.
+    Returns: Bias, Expected Move, Probability, Action + full decision matrix.
+    Cache: 15 minutes.
+    """
     try:
-        from agents.news_filter import fetch_news_for_ticker_async
-        news_items = await fetch_news_for_ticker_async(ticker, max_items=10)
-        result = {"ticker": ticker, "news": news_items, "count": len(news_items), "source": "rss"}
-        cache_storage[cache_key] = {"data": result, "ts": datetime.now(timezone.utc)}
-        return result
+        from agents.market_intel import fetch_market_intel
+        data = await fetch_market_intel()
+        return data
     except Exception as e:
-        logging.error(f"News RSS fetch error for {ticker}: {e}")
-        return {"ticker": ticker, "news": [], "count": 0, "source": "rss"}
+        logging.error(f"Market intel fetch error: {e}")
+        return {
+            "brent": 0, "vix": 0, "nifty": 0, "gift_nifty": 0,
+            "gift_premium": 0, "regulatory": "Neutral",
+            "bias": "Neutral", "bias_color": "#94a3b8",
+            "move_label": "Data unavailable", "probability": "—",
+            "action": "—", "error": str(e),
+        }
 
 
 # ======================= MIROFISH SWARM INTELLIGENCE =======================
