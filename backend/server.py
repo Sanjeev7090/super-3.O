@@ -9390,6 +9390,19 @@ async def analyze_orderflow(request: OrderFlowRequest):
         if len(bars) < 30:
             raise HTTPException(status_code=400, detail="Need at least 30 bars")
 
+        # ---- Fallback: synthesize volume for instruments that don't provide it
+        # (e.g., NSE option intraday bars have volume=0). Use range * close as
+        # a notional proxy so Volume Profile & Footprint show meaningful data.
+        total_vol_provided = sum(float(b.get('volume', 0) or 0) for b in bars)
+        if total_vol_provided <= 0:
+            for b in bars:
+                try:
+                    rng = max(1e-6, float(b['high']) - float(b['low']))
+                    close_px = max(1e-6, float(b['close']))
+                    b['volume'] = float(rng * close_px * 100.0)
+                except Exception:
+                    b['volume'] = 1.0
+
         # ---- enrich bars with buy/sell/delta/cvd ----
         candles_raw = []
         cvd = 0.0

@@ -281,57 +281,8 @@ function detectTrendlines(bars) {
 
   const result = [];
 
-  // ── 1. Uptrend Support (rising lows) ──
-  for (let a = 0; a < allLows.length - 1; a++) {
-    let best = null, bestScore = 1;
-    for (let b = a + 1; b < allLows.length; b++) {
-      const p1 = allLows[a], p2 = allLows[b];
-      if (p2.price <= p1.price * 1.001) continue;
-      if (p2.i - p1.i < 4) continue;
-      const slope = (p2.price - p1.price) / (p2.i - p1.i);
-      if (Math.abs(slope) > priceRange / n * 5) continue;
-      let broken = false;
-      for (let k = p1.i + 1; k < p2.i; k++) {
-        if (bars[k].low < p1.price + slope * (k - p1.i) - touchTol * 2) { broken = true; break; }
-      }
-      if (broken) continue;
-      const t = countTouches(p1.i, p1.price, slope, false);
-      if (t > bestScore) { bestScore = t; best = { p1, slope }; }
-    }
-    if (best) {
-      result.push({ type: 'uptrend', label: 'Uptrend Support', color: '#00E676',
-        lineStyle: 0, lineWidth: 2,
-        startTs: best.p1.ts, startPrice: best.p1.price,
-        endTs: lastTs, endPrice: Math.max(0.01, extEnd(best.p1.i, best.p1.price, best.slope)),
-        touches: bestScore });
-    }
-  }
-
-  // ── 2. Downtrend Resistance (falling highs) ──
-  for (let a = 0; a < allHighs.length - 1; a++) {
-    let best = null, bestScore = 1;
-    for (let b = a + 1; b < allHighs.length; b++) {
-      const p1 = allHighs[a], p2 = allHighs[b];
-      if (p2.price >= p1.price * 0.999) continue;
-      if (p2.i - p1.i < 4) continue;
-      const slope = (p2.price - p1.price) / (p2.i - p1.i);
-      if (Math.abs(slope) > priceRange / n * 5) continue;
-      let broken = false;
-      for (let k = p1.i + 1; k < p2.i; k++) {
-        if (bars[k].high > p1.price + slope * (k - p1.i) + touchTol * 2) { broken = true; break; }
-      }
-      if (broken) continue;
-      const t = countTouches(p1.i, p1.price, slope, true);
-      if (t > bestScore) { bestScore = t; best = { p1, slope }; }
-    }
-    if (best) {
-      result.push({ type: 'downtrend', label: 'Downtrend Resistance', color: '#FF4757',
-        lineStyle: 0, lineWidth: 2,
-        startTs: best.p1.ts, startPrice: best.p1.price,
-        endTs: lastTs, endPrice: Math.max(0.01, extEnd(best.p1.i, best.p1.price, best.slope)),
-        touches: bestScore });
-    }
-  }
+  // ── Uptrend / Downtrend lines disabled per user request ──
+  // (Only H-Support, H-Resistance, Channels and Fibonacci are drawn)
 
   // ── 3. Horizontal Support (clustered pivot lows) ──
   const lowBuckets = new Map();
@@ -791,10 +742,8 @@ const ChartPanel = ({
   const trendLineSeriesRef = useRef([]);
   const [trendlinesActive, setTrendlinesActive] = useState(false);
   const [trendlineCount, setTrendlineCount] = useState(0);
-  // Trendline type filter (all enabled by default)
+  // Trendline type filter (Uptrend/Downtrend removed per user request)
   const TREND_TYPES = [
-    { id: 'uptrend',      label: 'Uptrend',    color: '#00E676' },
-    { id: 'downtrend',    label: 'Downtrend',  color: '#FF4757' },
     { id: 'h_support',    label: 'H-Support',  color: '#3B82F6' },
     { id: 'h_resistance', label: 'H-Resist.',  color: '#FF6B00' },
     { id: 'channel_up',   label: 'Ch. High',   color: '#06B6D4' },
@@ -2554,8 +2503,6 @@ const ChartPanel = ({
             style={{ background: 'rgba(6,182,212,0.12)', borderColor: 'rgba(6,182,212,0.35)', color: '#06B6D4' }}
             data-testid="trendlines-badge"
           >
-            <span style={{ color: '#00E676' }}>━</span> Uptrend &nbsp;
-            <span style={{ color: '#FF4757' }}>━</span> Downtrend &nbsp;
             <span style={{ color: '#3B82F6' }}>┄</span> Support &nbsp;
             <span style={{ color: '#FF6B00' }}>┄</span> Resistance &nbsp;
             <span style={{ color: '#06B6D4' }}>┅</span> Channel &nbsp;
