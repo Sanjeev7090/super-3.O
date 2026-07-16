@@ -4,7 +4,7 @@ import json
 from datetime import datetime
 
 class GannTradingAPITester:
-    def __init__(self, base_url="https://repo-mirror-39.preview.emergentagent.com"):
+    def __init__(self, base_url="https://ai-trading-dash-8.preview.emergentagent.com"):
         self.base_url = base_url
         self.api_url = f"{base_url}/api"
         self.tests_run = 0
