@@ -475,6 +475,9 @@ class SMCAnalysisResponse(BaseModel):
     phases: List[SMCPhase] = []
     confidence: int = 0
     recommendation: str
+    valid_order_blocks: List[dict] = []
+    active_bull_obs: int = 0
+    active_bear_obs: int = 0
 
 # AMDS-Hybrid Models
 class AMDSAnalysisRequest(BaseModel):
@@ -4628,6 +4631,113 @@ def _smc_daily_bias(closes, highs, lows):
         return "BEARISH", f"LL: {ll_count} + price falling — Mild bearish"
     return "NEUTRAL", f"HH:{hh_count} HL:{hl_count} LL:{ll_count} LH:{lh_count}"
 
+def _smc_find_valid_order_blocks(bars, atr):
+    """
+    Find VALID Order Blocks using strict SMC rules (from images):
+
+    BULLISH OB (Valid):
+      1. OB candle must be BEARISH (last down candle before reversal)
+      2. OB candle must SWEEP previous candle's LOW (liquidity taken out)
+      3. There must be an FVG/imbalance nearby (gap between OB and continuation)
+      4. Entry zones: Wick (candle low), Body (candle open), 50% midpoint
+
+    BEARISH OB (Valid):
+      1. OB candle must be BULLISH (last up candle before reversal)
+      2. OB candle must SWEEP previous candle's HIGH (liquidity taken out)
+      3. There must be an FVG/imbalance nearby
+      4. Entry zones: Wick (candle high), Body (candle open), 50% midpoint
+
+    INVALID = skip completely (no marking).
+    """
+    n = len(bars)
+    if n < 5:
+        return []
+
+    valid_obs = []
+
+    for i in range(2, n - 1):
+        ob = bars[i]
+        prev = bars[i - 1]
+
+        # ── BULLISH OB CHECK ───────────────────────────────────────
+        # Condition 1: OB candle is bearish
+        if ob['close'] < ob['open']:
+            # Condition 2: Liquidity sweep — OB candle swept previous candle's LOW
+            liq_sweep = ob['low'] < prev['low']
+            # Condition 3: FVG — check next 1-3 candles for gap above OB
+            has_fvg = False
+            for k in range(1, min(4, n - i)):
+                if bars[i + k]['low'] > ob['high']:
+                    has_fvg = True
+                    break
+                # Relaxed: strong bullish move that leaves imbalance
+                if (bars[i + k]['close'] > bars[i + k]['open'] and
+                        bars[i + k]['close'] - bars[i + k]['open'] > atr * 0.6):
+                    has_fvg = True
+                    break
+
+            if liq_sweep and has_fvg:
+                ob_high  = ob['open']     # top of OB body (bearish: open > close)
+                ob_low   = ob['low']      # wick bottom
+                ob_body  = ob['close']    # bottom of OB body
+                entry_50 = (ob_high + ob_low) / 2.0
+                # Mitigation check: price re-entered OB zone
+                mitigated = any(bars[j]['low'] < ob_high for j in range(i + 1, n))
+                valid_obs.append({
+                    'type':       'bull',
+                    'ob_high':    round(ob_high, 2),
+                    'ob_low':     round(ob_low, 2),
+                    'entry_wick': round(ob_low, 2),
+                    'entry_body': round(ob_body, 2),
+                    'entry_50':   round(entry_50, 2),
+                    'sl':         round(ob_low - atr * 0.5, 2),
+                    'liq_sweep':  True,
+                    'has_fvg':    True,
+                    'mitigated':  mitigated,
+                    'bar_idx':    i,
+                })
+
+        # ── BEARISH OB CHECK ───────────────────────────────────────
+        # Condition 1: OB candle is bullish
+        elif ob['close'] > ob['open']:
+            # Condition 2: Liquidity sweep — OB candle swept previous candle's HIGH
+            liq_sweep = ob['high'] > prev['high']
+            # Condition 3: FVG — check next 1-3 candles for gap below OB
+            has_fvg = False
+            for k in range(1, min(4, n - i)):
+                if bars[i + k]['high'] < ob['low']:
+                    has_fvg = True
+                    break
+                if (bars[i + k]['close'] < bars[i + k]['open'] and
+                        bars[i + k]['open'] - bars[i + k]['close'] > atr * 0.6):
+                    has_fvg = True
+                    break
+
+            if liq_sweep and has_fvg:
+                ob_low   = ob['open']     # bottom of OB body (bullish: open < close)
+                ob_high  = ob['high']     # wick top
+                ob_body  = ob['close']    # top of OB body
+                entry_50 = (ob_high + ob_low) / 2.0
+                mitigated = any(bars[j]['high'] > ob_low for j in range(i + 1, n))
+                valid_obs.append({
+                    'type':       'bear',
+                    'ob_high':    round(ob_high, 2),
+                    'ob_low':     round(ob_low, 2),
+                    'entry_wick': round(ob_high, 2),
+                    'entry_body': round(ob_body, 2),
+                    'entry_50':   round(entry_50, 2),
+                    'sl':         round(ob_high + atr * 0.5, 2),
+                    'liq_sweep':  True,
+                    'has_fvg':    True,
+                    'mitigated':  mitigated,
+                    'bar_idx':    i,
+                })
+
+    # Return last 10 valid OBs (unmitigated first)
+    valid_obs.sort(key=lambda x: (x['mitigated'], -x['bar_idx']))
+    return valid_obs[:10]
+
+
 def _smc_liquidity_sweep(highs, lows, closes):
     """Phase 2: Liquidity Sweep — relaxed with wider proximity check"""
     if len(closes) < 5:
@@ -4779,6 +4889,12 @@ def run_full_smc_analysis(bars):
     phases = []
     confidence = 0
 
+    # ── Valid Order Blocks (new strict validation) ────────────────
+    valid_obs = _smc_find_valid_order_blocks(bars, atr)
+    active_obs  = [ob for ob in valid_obs if not ob['mitigated']]
+    bull_obs    = [ob for ob in active_obs if ob['type'] == 'bull']
+    bear_obs    = [ob for ob in active_obs if ob['type'] == 'bear']
+
     # Phase 1: Daily Bias
     bias, bias_detail = _smc_daily_bias(closes, highs, lows)
     p1_status = "PASS" if bias != "NEUTRAL" else "FAIL"
@@ -4876,6 +4992,9 @@ def run_full_smc_analysis(bars):
         "phases": phases,
         "confidence": min(confidence, 100),
         "recommendation": rec,
+        "valid_order_blocks": valid_obs,
+        "active_bull_obs": len(bull_obs),
+        "active_bear_obs": len(bear_obs),
     }
 
 

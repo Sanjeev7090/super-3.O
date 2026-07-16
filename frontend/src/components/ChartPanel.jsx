@@ -451,6 +451,7 @@ function computeSMCData(bars) {
   const fvgs = [];
   const obs  = [];
   for (let i = 2; i < n; i++) {
+    // ── BULLISH FVG: gap up — bars[i].low > bars[i-2].high ──────
     if (bars[i].low > bars[i - 2].high) {
       const endIdx = Math.min(i + 20, n - 1);
       let mit = false;
@@ -459,10 +460,46 @@ function computeSMCData(bars) {
       }
       fvgs.push({ type: 'bull', top: bars[i].low, bottom: bars[i - 2].high, mitigated: mit,
         startTime: bars[i - 1].timestamp / 1000, endTime: bars[endIdx].timestamp / 1000 });
-      if (bars[i].close > bars[i].open)
-        obs.push({ type: 'bull', high: bars[i - 1].high, low: bars[i - 1].low,
-          startTime: bars[i - 1].timestamp / 1000, endTime: bars[i].timestamp / 1000 });
+
+      // ── BULLISH OB VALIDATION (images rules) ──────────────────
+      // Rule 1: OB candle (bars[i-1]) must be BEARISH (last down candle)
+      const obIsBearish = bars[i - 1].close < bars[i - 1].open;
+      // Rule 2: LIQUIDITY SWEEP — OB candle must sweep previous candle's LOW
+      const liqSweep = i >= 2 && bars[i - 1].low < bars[i - 2].low;
+      // Rule 3: FVG already confirmed above (bars[i].low > bars[i-2].high)
+      // Additional: strong bullish response (next candle closes above OB high)
+      const bullResponse = bars[i].close > bars[i - 1].open;
+
+      if (obIsBearish && liqSweep) {
+        // Mitigation: price re-enters OB zone from above
+        let obMit = false;
+        for (let j = i + 1; j < n; j++) {
+          if (bars[j].low < bars[i - 1].high) { obMit = true; break; }
+        }
+        const obHigh = bars[i - 1].open;  // top of OB body (bearish: open > close)
+        const obLow  = bars[i - 1].low;   // wick bottom
+        const obBody = bars[i - 1].close; // bottom of OB body
+        obs.push({
+          type:       'bull',
+          high:       obHigh,
+          low:        obLow,
+          bodyHigh:   obHigh,
+          bodyLow:    obBody,
+          entry50:    (obHigh + obLow) / 2,
+          entryWick:  obLow,
+          entryBody:  obBody,
+          sl:         obLow - atr14 * 0.5,
+          hasLiqSweep: true,
+          hasFVG:     true,
+          strong:     bullResponse,
+          mitigated:  obMit,
+          startTime:  bars[i - 1].timestamp / 1000,
+          endTime:    bars[Math.min(i + 30, n - 1)].timestamp / 1000,
+        });
+      }
     }
+
+    // ── BEARISH FVG: gap down — bars[i].high < bars[i-2].low ────
     if (bars[i].high < bars[i - 2].low) {
       const endIdx = Math.min(i + 20, n - 1);
       let mit = false;
@@ -471,9 +508,41 @@ function computeSMCData(bars) {
       }
       fvgs.push({ type: 'bear', top: bars[i - 2].low, bottom: bars[i].high, mitigated: mit,
         startTime: bars[i - 1].timestamp / 1000, endTime: bars[endIdx].timestamp / 1000 });
-      if (bars[i].close < bars[i].open)
-        obs.push({ type: 'bear', high: bars[i - 1].high, low: bars[i - 1].low,
-          startTime: bars[i - 1].timestamp / 1000, endTime: bars[i].timestamp / 1000 });
+
+      // ── BEARISH OB VALIDATION (images rules) ──────────────────
+      // Rule 1: OB candle (bars[i-1]) must be BULLISH (last up candle)
+      const obIsBullish = bars[i - 1].close > bars[i - 1].open;
+      // Rule 2: LIQUIDITY SWEEP — OB candle must sweep previous candle's HIGH
+      const liqSweep = i >= 2 && bars[i - 1].high > bars[i - 2].high;
+      // Rule 3: FVG confirmed above
+      const bearResponse = bars[i].close < bars[i - 1].open;
+
+      if (obIsBullish && liqSweep) {
+        let obMit = false;
+        for (let j = i + 1; j < n; j++) {
+          if (bars[j].high > bars[i - 1].low) { obMit = true; break; }
+        }
+        const obLow   = bars[i - 1].open;  // bottom of OB body (bullish: close > open)
+        const obHigh  = bars[i - 1].high;  // wick top
+        const obBodyH = bars[i - 1].close; // top of OB body
+        obs.push({
+          type:       'bear',
+          high:       obHigh,
+          low:        obLow,
+          bodyHigh:   obBodyH,
+          bodyLow:    obLow,
+          entry50:    (obHigh + obLow) / 2,
+          entryWick:  obHigh,
+          entryBody:  obBodyH,
+          sl:         obHigh + atr14 * 0.5,
+          hasLiqSweep: true,
+          hasFVG:     true,
+          strong:     bearResponse,
+          mitigated:  obMit,
+          startTime:  bars[i - 1].timestamp / 1000,
+          endTime:    bars[Math.min(i + 30, n - 1)].timestamp / 1000,
+        });
+      }
     }
   }
 
@@ -680,7 +749,7 @@ function computeSMCData(bars) {
   return {
     fvgs:           fvgs.filter(f => !f.mitigated).slice(-40),
     swings:         swings.slice(-40),
-    obs:            obs.slice(-20),
+    obs:            obs.filter(ob => !ob.mitigated).slice(-15).concat(obs.filter(ob => ob.mitigated).slice(-5)),
     bosChoch:       bosChoch.slice(-20),
     pdZone,
     supplyZones:    supplyZones.slice(-6),
@@ -1173,24 +1242,86 @@ const ChartPanel = ({
       const yH = toY(ob.high);
       const yL = toY(ob.low);
       if (x1 == null || x2 == null || yH == null || yL == null) return;
-      const left  = Math.min(x1, x2);
-      const top   = Math.min(yH, yL);
-      const w     = Math.max(6, Math.abs(x2 - x1));
-      const h     = Math.max(2, Math.abs(yL - yH));
+      const left = Math.min(x1, x2);
+      const top  = Math.min(yH, yL);
+      const w    = Math.max(6, Math.abs(x2 - x1));
+      const h    = Math.max(2, Math.abs(yL - yH));
+
+      const isBull = ob.type === 'bull';
+      const isMit  = ob.mitigated;
+
       ctx.save();
-      if (ob.type === 'bull') {
-        ctx.fillStyle   = 'rgba(59,130,246,0.18)';
-        ctx.strokeStyle = 'rgba(59,130,246,0.85)';
+
+      // ── OB Box ───────────────────────────────────────────────
+      if (isBull) {
+        ctx.fillStyle   = isMit ? 'rgba(59,130,246,0.05)' : 'rgba(59,130,246,0.15)';
+        ctx.strokeStyle = isMit ? 'rgba(59,130,246,0.35)' : 'rgba(59,130,246,0.95)';
       } else {
-        ctx.fillStyle   = 'rgba(255,100,0,0.18)';
-        ctx.strokeStyle = 'rgba(255,100,0,0.85)';
+        ctx.fillStyle   = isMit ? 'rgba(255,100,0,0.05)'  : 'rgba(255,100,0,0.15)';
+        ctx.strokeStyle = isMit ? 'rgba(255,100,0,0.35)'  : 'rgba(255,100,0,0.95)';
       }
-      ctx.lineWidth = 1.5;
+      ctx.lineWidth = isMit ? 1 : 1.5;
+      if (isMit) ctx.setLineDash([4, 3]);
       ctx.fillRect(left, top, w, h);
       ctx.strokeRect(left, top, w, h);
-      ctx.fillStyle = ob.type === 'bull' ? 'rgba(59,130,246,0.9)' : 'rgba(255,100,0,0.9)';
-      ctx.font = 'bold 7px monospace';
-      ctx.fillText('OB' + (ob._tf && ob._tf !== 'AUTO' ? ` ${ob._tf}` : ''), left + 2, top + 8);
+      ctx.setLineDash([]);
+
+      // ── Entry zone dashed lines (Wick / 50% / Body) ──────────
+      if (!isMit) {
+        const levels = isBull
+          ? [
+              { price: ob.entryWick,  label: 'Wick',  clr: 'rgba(59,130,246,0.9)' },
+              { price: ob.entry50,    label: '50%',   clr: 'rgba(139,92,246,0.9)' },
+              { price: ob.entryBody,  label: 'Body',  clr: 'rgba(34,197,94,0.9)'  },
+            ]
+          : [
+              { price: ob.entryWick,  label: 'Wick',  clr: 'rgba(255,100,0,0.9)'  },
+              { price: ob.entry50,    label: '50%',   clr: 'rgba(139,92,246,0.9)' },
+              { price: ob.entryBody,  label: 'Body',  clr: 'rgba(248,113,113,0.9)'},
+            ];
+
+        levels.forEach(lv => {
+          const yE = toY(lv.price);
+          if (yE == null) return;
+          ctx.save();
+          ctx.strokeStyle = lv.clr;
+          ctx.lineWidth   = 1;
+          ctx.setLineDash([3, 3]);
+          ctx.globalAlpha = 0.80;
+          ctx.beginPath();
+          ctx.moveTo(left, yE);
+          ctx.lineTo(left + w, yE);
+          ctx.stroke();
+          ctx.setLineDash([]);
+          ctx.globalAlpha = 1;
+          ctx.fillStyle = lv.clr;
+          ctx.font      = 'bold 6px monospace';
+          ctx.fillText(lv.label, left + w + 2, yE + 2);
+          ctx.restore();
+        });
+      }
+
+      // ── OB Label ─────────────────────────────────────────────
+      ctx.fillStyle = isBull
+        ? (isMit ? 'rgba(59,130,246,0.45)' : 'rgba(59,130,246,0.95)')
+        : (isMit ? 'rgba(255,100,0,0.45)'  : 'rgba(255,100,0,0.95)');
+      ctx.font = `bold ${isMit ? 6 : 7}px monospace`;
+      const tfSuffix = ob._tf && ob._tf !== 'AUTO' ? ` ${ob._tf}` : '';
+      const mitSuffix = isMit ? ' ✕' : '';
+      ctx.fillText(
+        (isBull ? 'Bull OB' : 'Bear OB') + tfSuffix + mitSuffix,
+        left + 2, top + 8
+      );
+
+      // ── Liquidity Sweep indicator dot ─────────────────────────
+      if (!isMit && ob.hasLiqSweep) {
+        const dotY = isBull ? yL + 3 : yH - 3;
+        ctx.beginPath();
+        ctx.arc(left + w / 2, dotY, 3, 0, Math.PI * 2);
+        ctx.fillStyle = isBull ? '#22c55e' : '#ef4444';
+        ctx.fill();
+      }
+
       ctx.restore();
     });
 
