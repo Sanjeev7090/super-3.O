@@ -442,3 +442,13 @@ Clone trading app → Add dark/light mode, mobile responsiveness, MiroFish LangG
 - `brain.decide_sync(...)` now called with `scanner_inputs=scanner_inputs`
 
 **Testing**: Python assertions passed — smc_precomputed, delta_precomputed, danger_is_pick, orb_vote all confirmed in decision output. smc_score correctly shows 72+15=87 (danger boost applied).
+
+---
+
+## USER PREFERENCES (PERMANENT RULES)
+
+> **Set by user — NEVER override these:**
+> 1. **NO screenshots** — kabhi bhi screenshot mat lena
+> 2. **NO testing** — testing agent ya koi bhi automated testing mat karna
+> 3. Sirf code changes karo aur finish karo
+
