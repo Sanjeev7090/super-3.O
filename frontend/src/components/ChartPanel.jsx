@@ -2318,14 +2318,16 @@ const ChartPanel = ({
 
       if (yHigh == null || yLow == null) return;
 
+      const PRICE_SCALE_W = 82; // right price axis width — keep box from overlapping it
       const left  = (xStart != null && xStart > 0) ? xStart : 0;
-      const right = W - 6;
+      const right = W - PRICE_SCALE_W;
       const boxW  = Math.max(4, right - left);
       const top   = Math.min(yHigh, yLow);
       const boxH  = Math.max(4, Math.abs(yHigh - yLow));
 
       ctx.save();
-      ctx.fillStyle   = 'rgba(0, 0, 0, 0.60)';
+      // Tinted fill — low opacity so candles stay visible
+      ctx.fillStyle   = isBull ? 'rgba(34,197,94,0.10)' : 'rgba(248,113,113,0.10)';
       ctx.strokeStyle = isBull ? 'rgba(34,197,94,0.90)' : 'rgba(248,113,113,0.90)';
       ctx.lineWidth   = 1.8;
       ctx.fillRect(left, top, boxW, boxH);
@@ -2344,7 +2346,7 @@ const ChartPanel = ({
       }
       if (yMid != null) {
         ctx.setLineDash([3, 3]);
-        ctx.strokeStyle = 'rgba(255,255,255,0.22)';
+        ctx.strokeStyle = 'rgba(255,255,255,0.30)';
         ctx.lineWidth   = 0.8;
         ctx.beginPath(); ctx.moveTo(left, yMid); ctx.lineTo(right, yMid); ctx.stroke();
         ctx.setLineDash([]);
@@ -2355,12 +2357,12 @@ const ChartPanel = ({
       const drawLevel = (price, lineColor, lblText, lblBg, lblTxt) => {
         const yRaw = toY(price);
         if (yRaw == null || yRaw < 0 || yRaw > H) return;
-        // Line
+        // Line stops before price scale
         ctx.save();
         ctx.setLineDash([5, 4]);
         ctx.strokeStyle = lineColor;
         ctx.lineWidth = 1;
-        ctx.beginPath(); ctx.moveTo(left, yRaw); ctx.lineTo(right - 78, yRaw); ctx.stroke();
+        ctx.beginPath(); ctx.moveTo(left, yRaw); ctx.lineTo(right, yRaw); ctx.stroke();
         ctx.setLineDash([]);
         ctx.restore();
         // Label queued for collision-safe draw later
@@ -2381,18 +2383,20 @@ const ChartPanel = ({
           ctx.save();
           ctx.fillStyle = isBull ? 'rgba(34,197,94,0.95)' : 'rgba(248,113,113,0.95)';
           ctx.font = 'bold 9px monospace';
-          ctx.fillText(isBull ? '▲ ENTRY' : '▼ ENTRY', right + 2, eY + 3);
+          ctx.fillText(isBull ? '▲ ENTRY' : '▼ ENTRY', right - 55, eY + 3);
           ctx.restore();
         }
       }
     });
 
-    // ── Render all right-side labels (collision-safe) ──────────
+    // ── Render all right-side labels (collision-safe, inside chart area) ──────────
+    const PRICE_SCALE_W_OUTER = 82;
     ctx.save();
     ctx.font = 'bold 7.5px monospace';
     rightLabels.forEach(({ y, text, bg, txt }) => {
       const tw  = ctx.measureText(text).width;
-      const rx  = W - tw - 12;
+      // Keep pills inside chart — don't overflow into price scale
+      const rx  = W - PRICE_SCALE_W_OUTER - tw - 6;
       const ry  = y - 9;
       // Pill background
       ctx.fillStyle = bg;
