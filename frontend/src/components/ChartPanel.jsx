@@ -762,16 +762,14 @@ function computeSMCData(bars) {
 
 // ═══════════════════════════════════════════════════════════════════
 // BLACK BOX INDICATOR
-// Always draws:
-//  • Last pivot LOW  → Demand / Bull Black Box (extends to right edge)
-//  • Last pivot HIGH → Supply / Bear Black Box (extends to right edge)
-//  • HH / HL / LH / LL labels on all recent swings
-//  • BOS dashed line + label
-//  • Entry, SL, Target lines
+// Strategy (image-accurate):
+//  BULL Black Box = HL (Higher Low) → HH/BOS level (full consolidation zone)
+//  BEAR Black Box = LH (Lower High) → LL/BOS level (full consolidation zone)
+//  Extends to right edge of chart — represents "Previous Structure Zone"
 // ═══════════════════════════════════════════════════════════════════
 function computeBlackBox(bars) {
   if (!bars || bars.length < 15) return null;
-  const n = bars.length;
+  const n  = bars.length;
   const lb = Math.max(2, Math.min(3, Math.floor(n / 30)));
 
   // ── Detect pivots ──────────────────────────────────────────────
@@ -811,30 +809,56 @@ function computeBlackBox(bars) {
   if (hhC >= 1 && hlC >= 1) trend = 'UPTREND';
   else if (lhC >= 1 && llC >= 1) trend = 'DOWNTREND';
 
-  // ── ALWAYS build boxes from most recent pivot H & L ────────────
   const boxes = [];
 
-  // ── Bull / Demand Box — last significant pivot LOW ─────────────
-  const lastPL = pivotLows[pivotLows.length - 1];
-  if (lastPL) {
-    const bHigh = Math.max(lastPL.open, lastPL.close); // body top
-    const bLow  = lastPL.low;                          // wick bottom
-    // BOS: price later closed above the nearest pivot high after this low
-    const nextPH = pivotHighs.find(h => h.idx > lastPL.idx);
+  // ──────────────────────────────────────────────────────────────
+  // BULL Black Box — Demand Zone
+  // Formula: boxLow = last HL price | boxHigh = highest high in
+  //          range from HL to next pivot high (BOS candidate)
+  // ──────────────────────────────────────────────────────────────
+  const recentHLs = pivotLows.filter(l => l.label === 'HL');
+  const lastHL    = recentHLs.length > 0 ? recentHLs[recentHLs.length - 1] : null;
+
+  if (lastHL) {
+    // BOS candidate = first pivot high after this HL
+    const bosCandidate = pivotHighs.find(h => h.idx > lastHL.idx);
+
+    // Box boundaries
+    let boxHigh, boxLow;
+    boxLow = lastHL.price;  // HL level = bottom of Black Box
+
+    if (bosCandidate) {
+      // Top of box = highest high in the consolidation range (HL → BOS candidate)
+      let rangeHigh = bosCandidate.price;
+      for (let i = lastHL.idx; i <= bosCandidate.idx; i++)
+        rangeHigh = Math.max(rangeHigh, bars[i].high);
+      boxHigh = rangeHigh;
+    } else {
+      // No pivot high after HL — scan to the end for highest high
+      let rangeHigh = lastHL.high;
+      for (let i = lastHL.idx; i < n; i++)
+        rangeHigh = Math.max(rangeHigh, bars[i].high);
+      boxHigh = rangeHigh;
+    }
+
+    // BOS: did price close above bosCandidate?
     let bos = false, bosLevel = null;
-    if (nextPH) {
-      bosLevel = nextPH.price;
-      for (let j = nextPH.idx + 1; j < n; j++) {
-        if (bars[j].close > nextPH.price) { bos = true; break; }
+    if (bosCandidate) {
+      bosLevel = bosCandidate.price;
+      for (let j = bosCandidate.idx + 1; j < n; j++) {
+        if (bars[j].close > bosCandidate.price) { bos = true; break; }
       }
     }
-    const curr = bars[n - 1];
-    const inBox = curr.low <= bHigh * 1.003 && curr.close >= bLow * 0.997;
+
+    const curr   = bars[n - 1];
+    const inBox  = curr.low <= boxHigh * 1.003 && curr.close >= boxLow * 0.997;
+
+    // Price action confirmation in box area (last 5 bars)
     let confirm = null;
     for (let j = Math.max(0, n - 5); j < n; j++) {
       const b = bars[j];
-      if (b.low > bHigh * 1.02) continue;
-      const body = Math.abs(b.close - b.open);
+      if (b.low > boxHigh * 1.02) continue;
+      const body  = Math.abs(b.close - b.open);
       const lWick = Math.min(b.open, b.close) - b.low;
       if (b.close > b.open && lWick > body * 1.5) { confirm = 'Pin Bar'; break; }
       if (j > 0) {
@@ -843,36 +867,64 @@ function computeBlackBox(bars) {
           { confirm = 'Engulfing'; break; }
       }
     }
+
+    // Target = next significant pivot high above the box
+    const targetPH = pivotHighs.filter(h => h.idx > (bosCandidate?.idx || lastHL.idx) && h.price > boxHigh);
+    const target   = targetPH.length > 0 ? targetPH[0].price
+                   : bosCandidate ? bosCandidate.price * 1.015 : null;
+
     boxes.push({
-      type: 'bull', label: 'Demand Zone',
-      boxHigh: bHigh, boxLow: bLow, boxMid: (bHigh + bLow) / 2,
+      type: 'bull', label: 'Black Box (Demand)',
+      boxHigh, boxLow, boxMid: (boxHigh + boxLow) / 2,
       bos, bosLevel, confirm, inBox,
-      target: nextPH ? nextPH.price : null,
-      sl: bLow * 0.999,
-      startTs: bars[Math.max(0, lastPL.idx - 1)].timestamp / 1000,
+      target,
+      sl: boxLow * 0.998,
+      startTs: bars[Math.max(0, lastHL.idx - 3)].timestamp / 1000,
     });
   }
 
-  // ── Bear / Supply Box — last significant pivot HIGH ────────────
-  const lastPH = pivotHighs[pivotHighs.length - 1];
-  if (lastPH) {
-    const bHigh = lastPH.high;                          // wick top
-    const bLow  = Math.min(lastPH.open, lastPH.close);  // body bottom
-    const nextPL = pivotLows.find(l => l.idx > lastPH.idx);
+  // ──────────────────────────────────────────────────────────────
+  // BEAR Black Box — Supply Zone
+  // Formula: boxHigh = last LH price | boxLow = lowest low in
+  //          range from LH to next pivot low (BOS candidate)
+  // ──────────────────────────────────────────────────────────────
+  const recentLHs = pivotHighs.filter(h => h.label === 'LH');
+  const lastLH    = recentLHs.length > 0 ? recentLHs[recentLHs.length - 1] : null;
+
+  if (lastLH) {
+    const bosCandidate = pivotLows.find(l => l.idx > lastLH.idx);
+
+    let boxHigh, boxLow;
+    boxHigh = lastLH.price;  // LH level = top of Black Box
+
+    if (bosCandidate) {
+      let rangeLow = bosCandidate.price;
+      for (let i = lastLH.idx; i <= bosCandidate.idx; i++)
+        rangeLow = Math.min(rangeLow, bars[i].low);
+      boxLow = rangeLow;
+    } else {
+      let rangeLow = lastLH.low;
+      for (let i = lastLH.idx; i < n; i++)
+        rangeLow = Math.min(rangeLow, bars[i].low);
+      boxLow = rangeLow;
+    }
+
     let bos = false, bosLevel = null;
-    if (nextPL) {
-      bosLevel = nextPL.price;
-      for (let j = nextPL.idx + 1; j < n; j++) {
-        if (bars[j].close < nextPL.price) { bos = true; break; }
+    if (bosCandidate) {
+      bosLevel = bosCandidate.price;
+      for (let j = bosCandidate.idx + 1; j < n; j++) {
+        if (bars[j].close < bosCandidate.price) { bos = true; break; }
       }
     }
-    const curr = bars[n - 1];
-    const inBox = curr.high >= bLow * 0.997 && curr.close <= bHigh * 1.003;
+
+    const curr  = bars[n - 1];
+    const inBox = curr.high >= boxLow * 0.997 && curr.close <= boxHigh * 1.003;
+
     let confirm = null;
     for (let j = Math.max(0, n - 5); j < n; j++) {
       const b = bars[j];
-      if (b.high < bLow * 0.98) continue;
-      const body = Math.abs(b.close - b.open);
+      if (b.high < boxLow * 0.98) continue;
+      const body  = Math.abs(b.close - b.open);
       const uWick = b.high - Math.max(b.open, b.close);
       if (b.close < b.open && uWick > body * 1.5) { confirm = 'Pin Bar'; break; }
       if (j > 0) {
@@ -881,13 +933,18 @@ function computeBlackBox(bars) {
           { confirm = 'Engulfing'; break; }
       }
     }
+
+    const targetPL = pivotLows.filter(l => l.idx > (bosCandidate?.idx || lastLH.idx) && l.price < boxLow);
+    const target   = targetPL.length > 0 ? targetPL[0].price
+                   : bosCandidate ? bosCandidate.price * 0.985 : null;
+
     boxes.push({
-      type: 'bear', label: 'Supply Zone',
-      boxHigh: bHigh, boxLow: bLow, boxMid: (bHigh + bLow) / 2,
+      type: 'bear', label: 'Black Box (Supply)',
+      boxHigh, boxLow, boxMid: (boxHigh + boxLow) / 2,
       bos, bosLevel, confirm, inBox,
-      target: nextPL ? nextPL.price : null,
-      sl: bHigh * 1.001,
-      startTs: bars[Math.max(0, lastPH.idx - 1)].timestamp / 1000,
+      target,
+      sl: boxHigh * 1.002,
+      startTs: bars[Math.max(0, lastLH.idx - 3)].timestamp / 1000,
     });
   }
 
