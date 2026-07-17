@@ -354,50 +354,6 @@ def _fetch_brent_history() -> Dict:
         return {}
 
 
-def _calc_vix_percentile(vix: float, low: float, high: float) -> float:
-    if not low or not high or high == low:
-        return 50.0
-    pct = (vix - low) / (high - low) * 100
-    return round(max(0.0, min(100.0, pct)), 1)
-
-
-# ── Expiry Countdown ──────────────────────────────────────────────────────────
-
-def _next_expiry_info() -> Dict:
-    """
-    Next weekly options expiry countdown (IST timezone).
-    NIFTY  weekly expiry : every Thursday  3:30 PM IST
-    BANKNIFTY weekly     : every Wednesday 3:30 PM IST
-    """
-
-    IST = timezone(timedelta(hours=5, minutes=30))
-    now_ist = datetime.now(IST)
-
-    result = {}
-    for name, weekday in [("NIFTY", 3), ("BANKNIFTY", 2)]:  # Thu=3, Wed=2
-        days_ahead = (weekday - now_ist.weekday()) % 7
-        expiry_base = now_ist.replace(hour=15, minute=30, second=0, microsecond=0)
-
-        if days_ahead == 0 and now_ist >= expiry_base:
-            days_ahead = 7  # today's expiry already passed → next week
-
-        expiry_dt = expiry_base + timedelta(days=days_ahead)
-        delta     = expiry_dt - now_ist
-        total_sec = max(0, int(delta.total_seconds()))
-
-        days    = total_sec // 86400
-        hours   = (total_sec % 86400) // 3600
-        minutes = (total_sec % 3600) // 60
-
-        result[name] = {
-            "days":        days,
-            "hours":       hours,
-            "minutes":     minutes,
-            "expiry_date": expiry_dt.strftime("%d %b %Y"),
-            "is_today":    days == 0,
-        }
-
-    return result
 
 
 # ── Main Fetch ─────────────────────────────────────────────────────────────────
