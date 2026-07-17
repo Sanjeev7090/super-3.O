@@ -735,6 +735,58 @@ function FiiSection({ C, isDark }) {
             </div>
           )}
 
+          {/* ── Last 3 Days History Table ──────────────────────────────── */}
+          {fiiData?.history?.length > 0 && (
+            <div>
+              <div className="text-[9px] uppercase tracking-widest mb-1.5 font-semibold" style={{ color: C.textMuted }}>Last 3 Days FII / DII History</div>
+              <div className="rounded-lg overflow-hidden" style={{ border: `1px solid ${C.border}` }}>
+                <table className="w-full text-[9px]">
+                  <thead>
+                    <tr style={{ background: C.tableBg }}>
+                      {['Date', 'FII Buy', 'FII Sell', 'FII Net', 'DII Buy', 'DII Sell', 'DII Net', 'Signal'].map(h => (
+                        <th key={h} className="px-2 py-1.5 text-left font-semibold uppercase tracking-widest whitespace-nowrap" style={{ color: C.textMuted }}>{h}</th>
+                      ))}
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {fiiData.history.map((row, i) => {
+                      const isToday = i === 0;
+                      const fiiNet  = row.fii?.net ?? 0;
+                      const diiNet  = row.dii?.net ?? 0;
+                      return (
+                        <tr key={i} style={{
+                          borderTop: `1px solid ${C.borderSubtle}`,
+                          background: isToday ? (isDark ? 'rgba(255,255,255,0.03)' : 'rgba(0,0,0,0.02)') : 'transparent',
+                        }}>
+                          <td className="px-2 py-2 font-mono font-semibold whitespace-nowrap" style={{ color: C.textPrimary }}>
+                            {row.date}
+                            {isToday && <span className="ml-1 text-[8px] text-sky-400">Today</span>}
+                          </td>
+                          <td className="px-2 py-2 font-mono" style={{ color: '#22c55e' }}>{fmtCr(row.fii?.buy)}</td>
+                          <td className="px-2 py-2 font-mono" style={{ color: '#ef4444' }}>{fmtCr(row.fii?.sell)}</td>
+                          <td className="px-2 py-2 font-mono font-bold" style={{ color: fiiNet >= 0 ? '#22c55e' : '#ef4444' }}>
+                            {fiiNet >= 0 ? '+' : ''}{fmtCr(fiiNet)}
+                          </td>
+                          <td className="px-2 py-2 font-mono" style={{ color: '#22c55e' }}>{fmtCr(row.dii?.buy)}</td>
+                          <td className="px-2 py-2 font-mono" style={{ color: '#ef4444' }}>{fmtCr(row.dii?.sell)}</td>
+                          <td className="px-2 py-2 font-mono font-bold" style={{ color: diiNet >= 0 ? '#22c55e' : '#ef4444' }}>
+                            {row.dii ? (diiNet >= 0 ? '+' : '') + fmtCr(diiNet) : '—'}
+                          </td>
+                          <td className="px-2 py-2 whitespace-nowrap">
+                            <span className="px-1 py-0.5 rounded text-[8px] font-bold"
+                              style={{ background: `${row.classification?.color}18`, color: row.classification?.color }}>
+                              {row.classification?.action || '—'}
+                            </span>
+                          </td>
+                        </tr>
+                      );
+                    })}
+                  </tbody>
+                </table>
+              </div>
+            </div>
+          )}
+
           {/* FII Logic Table */}
           <div>
             <div className="text-[9px] uppercase tracking-widest mb-1.5 font-semibold" style={{ color: C.textMuted }}>FII Buying ka Basic Logic</div>

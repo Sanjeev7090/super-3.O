@@ -497,25 +497,48 @@ def _fetch_fii_data_sync() -> Dict:
         date_str = fii_row.get("date") or fii_row.get("tradeDate") or ""
         classification = _classify_fii(fii["net"])
 
-        # Try to get last 5 days data for trend
-        trend = []
+        # Try to get last 3 days full FII+DII history
+        history = []
         try:
             r2 = s.get(
                 "https://www.nseindia.com/api/fiidiioutflow?type=historical",
                 timeout=8, headers=headers
             )
             if r2.status_code == 200:
-                hist_raw = r2.json()
+                hist_raw  = r2.json()
                 hist_rows = hist_raw if isinstance(hist_raw, list) else hist_raw.get("data", [])
-                fii_hist = [x for x in hist_rows if "FII" in str(x.get("category","")).upper()][:5]
-                for h in fii_hist:
-                    p = _parse_fii_row(h)
-                    if p:
-                        trend.append({"date": h.get("date",""), "net": p["net"]})
+
+                # Group rows by date → {date: {fii: row, dii: row}}
+                by_date: Dict[str, dict] = {}
+                for h in hist_rows:
+                    d = h.get("date") or h.get("tradeDate") or ""
+                    cat = str(h.get("category", "")).upper()
+                    if d not in by_date:
+                        by_date[d] = {}
+                    if "FII" in cat:
+                        by_date[d]["fii_row"] = h
+                    elif "DII" in cat:
+                        by_date[d]["dii_row"] = h
+
+                # Take last 3 trading days (most recent first)
+                for date_key in sorted(by_date.keys(), reverse=True)[:3]:
+                    entry = by_date[date_key]
+                    f = _parse_fii_row(entry.get("fii_row", {})) if entry.get("fii_row") else None
+                    d_ = _parse_fii_row(entry.get("dii_row", {})) if entry.get("dii_row") else None
+                    if f:
+                        history.append({
+                            "date": date_key,
+                            "fii":  f,
+                            "dii":  d_,
+                            "classification": _classify_fii(f["net"]),
+                        })
         except Exception:
             pass
 
-        # Momentum signal from trend
+        # Build simple net-only trend list for momentum calc
+        trend = [{"date": h["date"], "net": h["fii"]["net"]} for h in history]
+
+        # Momentum signal from last 3 days
         momentum = "Neutral"
         if len(trend) >= 3:
             recent_nets = [t["net"] for t in trend[:3]]
@@ -535,6 +558,7 @@ def _fetch_fii_data_sync() -> Dict:
             "classification": classification,
             "momentum": momentum,
             "trend": trend,
+            "history": history,
             "source": "NSE Live",
         }
     except Exception as e:
