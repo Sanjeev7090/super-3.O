@@ -738,12 +738,19 @@ function FiiSection({ C, isDark }) {
           {/* ── Last 3 Days History Table ──────────────────────────────── */}
           {fiiData?.history?.length > 0 && (
             <div>
-              <div className="text-[9px] uppercase tracking-widest mb-1.5 font-semibold" style={{ color: C.textMuted }}>Last 3 Days FII / DII History</div>
+              <div className="flex items-center justify-between mb-1.5">
+                <div className="text-[9px] uppercase tracking-widest font-semibold" style={{ color: C.textMuted }}>
+                  Last 3 Days FII / DII Activity (F&amp;O Contracts)
+                </div>
+                {fiiData.note && (
+                  <span className="text-[8px]" style={{ color: C.textMuted }}>{fiiData.note}</span>
+                )}
+              </div>
               <div className="rounded-lg overflow-hidden" style={{ border: `1px solid ${C.border}` }}>
                 <table className="w-full text-[9px]">
                   <thead>
                     <tr style={{ background: C.tableBg }}>
-                      {['Date', 'FII Buy', 'FII Sell', 'FII Net', 'DII Buy', 'DII Sell', 'DII Net', 'Signal'].map(h => (
+                      {['Date', 'FII Long', 'FII Short', 'FII Net Idx', 'DII Long', 'DII Short', 'DII Net Idx', 'Signal'].map(h => (
                         <th key={h} className="px-2 py-1.5 text-left font-semibold uppercase tracking-widest whitespace-nowrap" style={{ color: C.textMuted }}>{h}</th>
                       ))}
                     </tr>
@@ -753,6 +760,7 @@ function FiiSection({ C, isDark }) {
                       const isToday = i === 0;
                       const fiiNet  = row.fii?.net ?? 0;
                       const diiNet  = row.dii?.net ?? 0;
+                      const fmtN = (v) => v == null ? '—' : Number(v).toLocaleString('en-IN');
                       return (
                         <tr key={i} style={{
                           borderTop: `1px solid ${C.borderSubtle}`,
@@ -760,17 +768,17 @@ function FiiSection({ C, isDark }) {
                         }}>
                           <td className="px-2 py-2 font-mono font-semibold whitespace-nowrap" style={{ color: C.textPrimary }}>
                             {row.date}
-                            {isToday && <span className="ml-1 text-[8px] text-sky-400">Today</span>}
+                            {isToday && <span className="ml-1 text-[8px] text-sky-400">Latest</span>}
                           </td>
-                          <td className="px-2 py-2 font-mono" style={{ color: '#22c55e' }}>{fmtCr(row.fii?.buy)}</td>
-                          <td className="px-2 py-2 font-mono" style={{ color: '#ef4444' }}>{fmtCr(row.fii?.sell)}</td>
+                          <td className="px-2 py-2 font-mono" style={{ color: '#22c55e' }}>{fmtN(row.fii?.buy)}</td>
+                          <td className="px-2 py-2 font-mono" style={{ color: '#ef4444' }}>{fmtN(row.fii?.sell)}</td>
                           <td className="px-2 py-2 font-mono font-bold" style={{ color: fiiNet >= 0 ? '#22c55e' : '#ef4444' }}>
-                            {fiiNet >= 0 ? '+' : ''}{fmtCr(fiiNet)}
+                            {fiiNet >= 0 ? '+' : ''}{fmtN(fiiNet)}
                           </td>
-                          <td className="px-2 py-2 font-mono" style={{ color: '#22c55e' }}>{fmtCr(row.dii?.buy)}</td>
-                          <td className="px-2 py-2 font-mono" style={{ color: '#ef4444' }}>{fmtCr(row.dii?.sell)}</td>
+                          <td className="px-2 py-2 font-mono" style={{ color: '#22c55e' }}>{fmtN(row.dii?.buy)}</td>
+                          <td className="px-2 py-2 font-mono" style={{ color: '#ef4444' }}>{fmtN(row.dii?.sell)}</td>
                           <td className="px-2 py-2 font-mono font-bold" style={{ color: diiNet >= 0 ? '#22c55e' : '#ef4444' }}>
-                            {row.dii ? (diiNet >= 0 ? '+' : '') + fmtCr(diiNet) : '—'}
+                            {row.dii ? (diiNet >= 0 ? '+' : '') + fmtN(diiNet) : '—'}
                           </td>
                           <td className="px-2 py-2 whitespace-nowrap">
                             <span className="px-1 py-0.5 rounded text-[8px] font-bold"

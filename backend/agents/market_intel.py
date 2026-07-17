@@ -453,117 +453,146 @@ def _parse_fii_row(row: dict) -> Optional[Dict]:
         return None
 
 
-def _classify_fii(net_cr: float) -> Dict:
-    """Return action label, nifty impact, move range and reason."""
-    if   net_cr >= 2000:  return {"action": "Heavy Buying",    "nifty": "Strong Bullish",  "move": "+150 to +400 pts", "reason": "Liquidity badhti hai, sentiment positive", "color": "#22c55e"}
-    elif net_cr >= 500:   return {"action": "Moderate Buying", "nifty": "Mild Bullish",    "move": "+50 to +150 pts",  "reason": "Normal up move",                          "color": "#86efac"}
-    elif net_cr >= -500:  return {"action": "Neutral",         "nifty": "Sideways",        "move": "-100 to +100 pts", "reason": "Market apne technicals pe chalega",        "color": "#94a3b8"}
-    elif net_cr >= -1000: return {"action": "Mild Selling",    "nifty": "Mild Bearish",    "move": "-50 to -150 pts",  "reason": "Mild pressure",                           "color": "#fca5a5"}
-    else:                 return {"action": "Heavy Selling",   "nifty": "Bearish",         "move": "-150 to -400 pts", "reason": "Pressure badhta hai",                     "color": "#ef4444"}
+def _parse_fao_csv(text: str) -> Optional[Dict]:
+    """
+    Parse NSE F&O participant CSV:
+    archives.nseindia.com/content/nsccl/fao_participant_vol_{DDMMYYYY}.csv
+    Returns FII and DII index futures net-position summary.
+    """
+    try:
+        import csv, io
+        lines = [l for l in text.splitlines() if l.strip() and not l.startswith('"')]
+        reader = csv.DictReader(lines)
+        rows = {r.get("Client Type","").strip().upper(): r for r in reader}
+
+        def _n(row, key):
+            val = row.get(key, "0") or "0"
+            return int(str(val).replace(",","").strip() or "0")
+
+        result = {}
+        for party in ("FII", "DII"):
+            row = rows.get(party)
+            if not row: continue
+            fi_long  = _n(row, "Future Index Long")
+            fi_short = _n(row, "Future Index Short")
+            fs_long  = _n(row, "Future Stock Long")
+            fs_short = _n(row, "Future Stock Short")
+            opt_long = _n(row, "Total Long Contracts")
+            opt_short= _n(row, "Total Short Contracts")
+
+            net_idx  = fi_long - fi_short
+            net_total= opt_long - opt_short
+            result[party.lower()] = {
+                "fi_long":   fi_long,
+                "fi_short":  fi_short,
+                "net_index": net_idx,
+                "net_total": net_total,
+                "total_long": opt_long,
+                "total_short": opt_short,
+            }
+        return result if result else None
+    except Exception as e:
+        logger.debug(f"FAO CSV parse error: {e}")
+        return None
 
 
 def _fetch_fii_data_sync() -> Dict:
-    """Fetch FII/DII data from NSE website using curl_cffi."""
-    try:
-        from curl_cffi import requests as cffi_req
-        s = cffi_req.Session(impersonate="chrome120")
-        headers = {
-            "Accept":           "application/json, text/plain, */*",
-            "Accept-Language":  "en-US,en;q=0.9",
-            "Referer":          "https://www.nseindia.com/market-data/fii-dii-activity",
-        }
-        # Warm NSE cookies
-        s.get("https://www.nseindia.com/", timeout=8, headers={"Accept": "text/html"})
-        s.get("https://www.nseindia.com/market-data/fii-dii-activity", timeout=8, headers={"Accept": "text/html"})
+    """
+    Fetch FII/DII activity from NSE F&O participant CSV archives.
+    Works reliably for last 3 trading days.
+    """
+    from curl_cffi import requests as cffi_req
 
-        # Try primary FII endpoint
-        r = s.get("https://www.nseindia.com/api/fiidiioutflow", timeout=10, headers=headers)
-        if r.status_code == 200:
-            raw = r.json()
-            rows = raw if isinstance(raw, list) else raw.get("data", [])
-        else:
-            return {}
+    s = cffi_req.Session(impersonate="chrome120")
+    s.get("https://www.nseindia.com/", timeout=8, headers={"Accept": "text/html"})
 
-        fii_row = next((x for x in rows if "FII" in str(x.get("category","")).upper()), None)
-        dii_row = next((x for x in rows if "DII" in str(x.get("category","")).upper()), None)
-        if not fii_row:
-            return {}
+    def _trading_days_back(n: int = 5):
+        """Return last n calendar days that are weekdays."""
+        days = []
+        d = datetime.now().date()
+        while len(days) < n:
+            d -= timedelta(days=1)
+            if d.weekday() < 5:   # Mon-Fri
+                days.append(d)
+        return days
 
-        fii = _parse_fii_row(fii_row)
-        dii = _parse_fii_row(dii_row) if dii_row else None
-        if not fii:
-            return {}
+    trading_days = _trading_days_back(5)   # try 5 in case some are holidays
+    history = []
 
-        date_str = fii_row.get("date") or fii_row.get("tradeDate") or ""
-        classification = _classify_fii(fii["net"])
-
-        # Try to get last 3 days full FII+DII history
-        history = []
+    for td in trading_days:
+        if len(history) >= 3:
+            break
+        ds = td.strftime("%d%m%Y")
+        url = f"https://archives.nseindia.com/content/nsccl/fao_participant_vol_{ds}.csv"
         try:
-            r2 = s.get(
-                "https://www.nseindia.com/api/fiidiioutflow?type=historical",
-                timeout=8, headers=headers
-            )
-            if r2.status_code == 200:
-                hist_raw  = r2.json()
-                hist_rows = hist_raw if isinstance(hist_raw, list) else hist_raw.get("data", [])
+            r = s.get(url, timeout=8)
+            if r.status_code != 200 or r.text.strip().startswith("<"):
+                continue
+            parsed = _parse_fao_csv(r.text)
+            if not parsed:
+                continue
+            fii = parsed.get("fii", {})
+            dii = parsed.get("dii", {})
+            net_idx = fii.get("net_index", 0)
+            history.append({
+                "date": td.strftime("%d-%b-%Y"),
+                "fii":  {
+                    "buy":  fii.get("fi_long", 0),
+                    "sell": fii.get("fi_short", 0),
+                    "net":  net_idx,
+                    "net_total": fii.get("net_total", 0),
+                    "total_long": fii.get("total_long", 0),
+                    "total_short": fii.get("total_short", 0),
+                },
+                "dii": {
+                    "buy":  dii.get("fi_long", 0),
+                    "sell": dii.get("fi_short", 0),
+                    "net":  dii.get("net_index", 0),
+                    "net_total": dii.get("net_total", 0),
+                },
+                "classification": _classify_fii_fo(net_idx),
+            })
+        except Exception as e:
+            logger.debug(f"FAO CSV fetch failed for {ds}: {e}")
+            continue
 
-                # Group rows by date → {date: {fii: row, dii: row}}
-                by_date: Dict[str, dict] = {}
-                for h in hist_rows:
-                    d = h.get("date") or h.get("tradeDate") or ""
-                    cat = str(h.get("category", "")).upper()
-                    if d not in by_date:
-                        by_date[d] = {}
-                    if "FII" in cat:
-                        by_date[d]["fii_row"] = h
-                    elif "DII" in cat:
-                        by_date[d]["dii_row"] = h
-
-                # Take last 3 trading days (most recent first)
-                for date_key in sorted(by_date.keys(), reverse=True)[:3]:
-                    entry = by_date[date_key]
-                    f = _parse_fii_row(entry.get("fii_row", {})) if entry.get("fii_row") else None
-                    d_ = _parse_fii_row(entry.get("dii_row", {})) if entry.get("dii_row") else None
-                    if f:
-                        history.append({
-                            "date": date_key,
-                            "fii":  f,
-                            "dii":  d_,
-                            "classification": _classify_fii(f["net"]),
-                        })
-        except Exception:
-            pass
-
-        # Build simple net-only trend list for momentum calc
-        trend = [{"date": h["date"], "net": h["fii"]["net"]} for h in history]
-
-        # Momentum signal from last 3 days
-        momentum = "Neutral"
-        if len(trend) >= 3:
-            recent_nets = [t["net"] for t in trend[:3]]
-            if all(n > 500 for n in recent_nets):
-                momentum = "Strong Bullish (3+ days buying)"
-            elif all(n > 0 for n in recent_nets):
-                momentum = "Mild Bullish (3 days positive)"
-            elif all(n < -500 for n in recent_nets):
-                momentum = "Strong Bearish (3+ days selling)"
-            elif all(n < 0 for n in recent_nets):
-                momentum = "Mild Bearish (3 days negative)"
-
-        return {
-            "date": date_str,
-            "fii": fii,
-            "dii": dii,
-            "classification": classification,
-            "momentum": momentum,
-            "trend": trend,
-            "history": history,
-            "source": "NSE Live",
-        }
-    except Exception as e:
-        logger.debug(f"FII NSE fetch failed: {e}")
+    if not history:
         return {}
+
+    # Latest entry = today/most recent day
+    latest = history[0]
+    trend  = [{"date": h["date"], "net": h["fii"]["net"]} for h in history]
+
+    # Momentum
+    momentum = "Neutral"
+    nets = [h["fii"]["net"] for h in history]
+    if len(nets) >= 3:
+        if all(n > 5000 for n in nets[:3]):   momentum = "Strong Bullish (3+ days long)"
+        elif all(n > 0  for n in nets[:3]):   momentum = "Mild Bullish (3 days net long)"
+        elif all(n < -5000 for n in nets[:3]):momentum = "Strong Bearish (3+ days short)"
+        elif all(n < 0  for n in nets[:3]):   momentum = "Mild Bearish (3 days net short)"
+
+    cls = latest["classification"]
+    return {
+        "date":           latest["date"],
+        "fii":            latest["fii"],
+        "dii":            latest["dii"],
+        "classification": cls,
+        "momentum":       momentum,
+        "trend":          trend,
+        "history":        history,
+        "source":         "NSE F&O Archive",
+        "note":           "Data: NSE F&O Participant-wise Position (Contracts)",
+    }
+
+
+def _classify_fii_fo(net_contracts: int) -> Dict:
+    """Classify FII based on F&O net index futures contracts."""
+    if   net_contracts >  20000: return {"action": "Heavy Buying",    "nifty": "Strong Bullish",  "move": "+150 to +400 pts", "color": "#22c55e"}
+    elif net_contracts >   5000: return {"action": "Moderate Buying", "nifty": "Mild Bullish",    "move": "+50 to +150 pts",  "color": "#86efac"}
+    elif net_contracts >  -5000: return {"action": "Neutral",         "nifty": "Sideways",        "move": "-100 to +100 pts", "color": "#94a3b8"}
+    elif net_contracts > -20000: return {"action": "Mild Selling",    "nifty": "Mild Bearish",    "move": "-50 to -150 pts",  "color": "#fca5a5"}
+    else:                        return {"action": "Heavy Selling",   "nifty": "Bearish",         "move": "-150 to -400 pts", "color": "#ef4444"}
 
 
 async def fetch_fii_intel() -> Dict:
