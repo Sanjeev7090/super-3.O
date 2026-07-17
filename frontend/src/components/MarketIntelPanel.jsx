@@ -49,6 +49,7 @@ const MarketIntelPanel = ({ onClose }) => {
   const [ts,      setTs]      = useState(null);
   const [brentTf, setBrentTf] = useState('D');
   const [vixTf,   setVixTf]   = useState('D');
+  const [nasdaqTf, setNasdaqTf] = useState('D');
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -74,6 +75,9 @@ const MarketIntelPanel = ({ onClose }) => {
   const vixChg   = vixTf === 'W' ? data?.vix_chg_week
                  : vixTf === 'M' ? data?.vix_chg_month
                  : data?.vix_chg_pct;
+  const nasdaqChg = nasdaqTf === 'W' ? data?.nasdaq_chg_week
+                  : nasdaqTf === 'M' ? data?.nasdaq_chg_month
+                  : data?.nasdaq_chg_pct;
 
   const chgColor = (v) =>
     v > 0 ? '#22c55e' : v < 0 ? '#ef4444' : C.textMuted;
@@ -213,6 +217,27 @@ const MarketIntelPanel = ({ onClose }) => {
                 </div>
               </div>
 
+              {/* Nasdaq */}
+              <div className="rounded-xl p-3" style={{ background: C.cardBg, border: `1px solid ${C.border}` }}>
+                <div className="flex items-center justify-between mb-1.5">
+                  <div className="flex items-center gap-1.5 text-[9px]" style={{ color: C.textMuted }}>
+                    <ChartLine size={12} />
+                    <span className="uppercase tracking-widest">Nasdaq</span>
+                  </div>
+                  <div className="flex items-center gap-0.5">
+                    {['D','W','M'].map(t => (
+                      <TfPill key={t} value={t} active={nasdaqTf === t} onClick={() => setNasdaqTf(t)} />
+                    ))}
+                  </div>
+                </div>
+                <div className="text-sm font-bold font-mono" style={{ color: C.textPrimary }}>
+                  {data.nasdaq > 0 ? data.nasdaq.toLocaleString('en-US', { maximumFractionDigits: 0 }) : '—'}
+                </div>
+                <div className="text-[10px] mt-0.5 font-mono" style={{ color: chgColor(nasdaqChg) }}>
+                  {fmtPct(nasdaqChg)} {nasdaqTf === 'D' ? '(Day)' : nasdaqTf === 'W' ? '(Week)' : '(Month)'}
+                </div>
+              </div>
+
               {/* Other cards — Nifty 50, Nasdaq, GIFT, Regulatory, Bias */}
               {[
                 {
@@ -221,18 +246,6 @@ const MarketIntelPanel = ({ onClose }) => {
                   sub: fmtPct(data.nifty_chg_pct),
                   subColor: chgColor(data.nifty_chg_pct),
                   icon: <TrendUp size={14} />,
-                },
-                {
-                  label: 'Nasdaq',
-                  value: data.nasdaq > 0 ? data.nasdaq.toLocaleString('en-US', { maximumFractionDigits: 0 }) : '—',
-                  sub: data.nasdaq_pts !== 0
-                    ? `${data.nasdaq_pts > 0 ? '+' : ''}${fmt(data.nasdaq_pts, 0)} pts (${fmtPct(data.nasdaq_chg_pct)})`
-                    : fmtPct(data.nasdaq_chg_pct),
-                  subColor: chgColor(data.nasdaq_chg_pct),
-                  icon: <TrendUp size={14} />,
-                  badge: data.nasdaq_pts !== 0 ? data.nasdaq_nifty_label : null,
-                  badgeColor: data.nasdaq_nifty_color,
-                  badgeTitle: 'Nifty Impact',
                 },
                 {
                   label: 'GIFT Nifty',
@@ -257,7 +270,7 @@ const MarketIntelPanel = ({ onClose }) => {
                   icon: <Gauge size={14} />,
                   valueColor: data.bias_color,
                 },
-              ].map(({ label, value, sub, subColor, icon, valueColor, badge, badgeColor, badgeTitle }) => (
+              ].map(({ label, value, sub, subColor, icon, valueColor }) => (
                 <div key={label} className="rounded-xl p-3" style={{ background: C.cardBg, border: `1px solid ${C.border}` }}>
                   <div className="flex items-center gap-1.5 text-[9px] mb-1.5" style={{ color: C.textMuted }}>
                     {icon}
@@ -265,12 +278,6 @@ const MarketIntelPanel = ({ onClose }) => {
                   </div>
                   <div className="text-sm font-bold font-mono" style={{ color: valueColor || C.textPrimary }}>{value}</div>
                   <div className="text-[10px] mt-0.5 font-mono" style={{ color: subColor }}>{sub}</div>
-                  {badge && (
-                    <div className="mt-1.5 flex items-center gap-1">
-                      <span className="text-[8px] uppercase tracking-widest" style={{ color: C.textMuted }}>{badgeTitle}:</span>
-                      <span className="text-[9px] font-bold font-mono" style={{ color: badgeColor }}>{badge}</span>
-                    </div>
-                  )}
                 </div>
               ))}
             </div>

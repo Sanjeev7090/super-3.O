@@ -354,6 +354,31 @@ def _fetch_brent_history() -> Dict:
         return {}
 
 
+def _fetch_nasdaq_history() -> Dict:
+    """Fetch Nasdaq weekly/monthly change."""
+    import yfinance as yf
+    try:
+        hist = yf.Ticker("^IXIC").history(period="3mo")
+        if hist.empty:
+            return {}
+        closes = hist["Close"].dropna()
+        current = float(closes.iloc[-1])
+
+        def _pct(n: int) -> Optional[float]:
+            if len(closes) > n:
+                prev = float(closes.iloc[-n - 1])
+                return round((current - prev) / prev * 100, 2) if prev else None
+            return None
+
+        return {
+            "nasdaq_chg_week":  _pct(5),
+            "nasdaq_chg_month": _pct(21),
+        }
+    except Exception as e:
+        logger.debug(f"Nasdaq history fetch failed: {e}")
+        return {}
+
+
 
 
 # ── FII / DII Data from NSE ────────────────────────────────────────────────────
@@ -582,11 +607,12 @@ async def _build_intel() -> Dict:
         nasdaq_nifty_signal = "Neutral"
 
     # Phase 2: parallel GIFT + history fetches
-    gift_task       = loop.run_in_executor(None, _fetch_gift_nifty, nifty)
-    vix_hist_task   = loop.run_in_executor(None, _fetch_vix_history)
-    brent_hist_task = loop.run_in_executor(None, _fetch_brent_history)
-    gift_nifty, vix_hist, brent_hist = await asyncio.gather(
-        gift_task, vix_hist_task, brent_hist_task)
+    gift_task         = loop.run_in_executor(None, _fetch_gift_nifty, nifty)
+    vix_hist_task     = loop.run_in_executor(None, _fetch_vix_history)
+    brent_hist_task   = loop.run_in_executor(None, _fetch_brent_history)
+    nasdaq_hist_task  = loop.run_in_executor(None, _fetch_nasdaq_history)
+    gift_nifty, vix_hist, brent_hist, nasdaq_hist = await asyncio.gather(
+        gift_task, vix_hist_task, brent_hist_task, nasdaq_hist_task)
 
     expiry_info  = _next_expiry_info()
     gift_premium = round(gift_nifty - nifty, 1)
@@ -617,6 +643,8 @@ async def _build_intel() -> Dict:
         "nifty": round(nifty, 2), "nifty_chg_pct": nifty_chg,
         "nasdaq": round(nasdaq, 2), "nasdaq_chg_pct": nasdaq_chg,
         "nasdaq_pts": nasdaq_pts,
+        "nasdaq_chg_week":  nasdaq_hist.get("nasdaq_chg_week"),
+        "nasdaq_chg_month": nasdaq_hist.get("nasdaq_chg_month"),
         "nasdaq_nifty_label": nasdaq_nifty_label,
         "nasdaq_nifty_color": nasdaq_nifty_color,
         "nasdaq_nifty_signal": nasdaq_nifty_signal,
