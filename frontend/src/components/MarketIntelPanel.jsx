@@ -627,11 +627,19 @@ function FiiSection({ C, isDark }) {
   const cls   = fiiData?.classification;
   const trend = fiiData?.trend || [];
 
-  const fmtCr = (v) => {
+  // Contracts formatter (no ₹ sign — these are F&O lots, not crores)
+  const fmtC = (v) => {
     if (v == null) return '—';
     const abs = Math.abs(v);
-    if (abs >= 10000) return `₹${(v / 100).toFixed(0)}Cr`;
-    return `₹${Number(v).toFixed(0)} Cr`;
+    const sign = v < 0 ? '-' : (v > 0 && abs > 0) ? '+' : '';
+    if (abs >= 100000) return `${sign}${(abs / 100000).toFixed(2)}L`;
+    if (abs >= 1000)   return `${sign}${(abs / 1000).toFixed(1)}K`;
+    return `${sign}${abs}`;
+  };
+  // Raw header net display (no sign flip for zero)
+  const fmtCHead = (v) => {
+    if (v == null) return '—';
+    return `${v >= 0 ? '+' : ''}${Math.abs(v) >= 1000 ? (v/1000).toFixed(1)+'K' : v} lots`;
   };
 
   return (
@@ -653,11 +661,11 @@ function FiiSection({ C, isDark }) {
               className="px-1.5 py-0.5 rounded text-[9px] font-bold ml-1"
               style={{ background: `${cls?.color}20`, color: cls?.color }}
             >
-              {fmtCr(live.net)} Net
+              {fmtCHead(live.net)}
             </span>
           )}
           <span className="text-[9px] ml-1" style={{ color: C.textMuted }}>
-            NSE Live
+            NSE F&amp;O
           </span>
         </div>
         <span className="text-[10px] transition-transform" style={{ color: C.textMuted, transform: open ? 'rotate(180deg)' : 'rotate(0deg)', display: 'inline-block' }}>▼</span>
@@ -677,14 +685,16 @@ function FiiSection({ C, isDark }) {
           {live && (
             <div className="rounded-lg p-3 space-y-2" style={{ background: C.cardBg, border: `1px solid ${C.border}` }}>
               <div className="flex items-center justify-between mb-1">
-                <span className="text-[9px] uppercase tracking-widest font-bold" style={{ color: C.textMuted }}>Today's FII/DII Data</span>
+                <span className="text-[9px] uppercase tracking-widest font-bold" style={{ color: C.textMuted }}>
+                  Latest F&amp;O Positions (Lots/Contracts)
+                </span>
                 <span className="text-[9px]" style={{ color: C.textMuted }}>{fiiData.date}</span>
               </div>
               <div className="grid grid-cols-3 gap-2">
                 {[
-                  { label: 'FII Buy',  val: fmtCr(live.buy),  color: '#22c55e' },
-                  { label: 'FII Sell', val: fmtCr(live.sell), color: '#ef4444' },
-                  { label: 'FII Net',  val: fmtCr(live.net),  color: cls?.color || '#94a3b8' },
+                  { label: 'FII Long',  val: fmtC(live.buy),  color: '#22c55e' },
+                  { label: 'FII Short', val: fmtC(live.sell), color: '#ef4444' },
+                  { label: 'FII Net',   val: fmtC(live.net),  color: cls?.color || '#94a3b8' },
                 ].map(({ label, val, color }) => (
                   <div key={label} className="text-center">
                     <div className="text-[9px]" style={{ color: C.textMuted }}>{label}</div>
@@ -695,9 +705,9 @@ function FiiSection({ C, isDark }) {
               {fiiData.dii && (
                 <div className="grid grid-cols-3 gap-2 pt-1.5" style={{ borderTop: `1px solid ${C.borderSubtle}` }}>
                   {[
-                    { label: 'DII Buy',  val: fmtCr(fiiData.dii.buy),  color: '#22c55e' },
-                    { label: 'DII Sell', val: fmtCr(fiiData.dii.sell), color: '#ef4444' },
-                    { label: 'DII Net',  val: fmtCr(fiiData.dii.net),  color: fiiData.dii.net >= 0 ? '#22c55e' : '#ef4444' },
+                    { label: 'DII Long',  val: fmtC(fiiData.dii.buy),  color: '#22c55e' },
+                    { label: 'DII Short', val: fmtC(fiiData.dii.sell), color: '#ef4444' },
+                    { label: 'DII Net',   val: fmtC(fiiData.dii.net),  color: fiiData.dii.net >= 0 ? '#22c55e' : '#ef4444' },
                   ].map(({ label, val, color }) => (
                     <div key={label} className="text-center">
                       <div className="text-[9px]" style={{ color: C.textMuted }}>{label}</div>
@@ -721,7 +731,7 @@ function FiiSection({ C, isDark }) {
                 <div className="flex gap-1 pt-1 flex-wrap">
                   {trend.map((t, i) => (
                     <span key={i} className="px-1 py-0.5 rounded text-[8px] font-mono" style={{ background: t.net >= 0 ? 'rgba(34,197,94,0.12)' : 'rgba(239,68,68,0.12)', color: t.net >= 0 ? '#22c55e' : '#ef4444' }}>
-                      {t.date ? t.date.slice(0, 6) : `D-${i+1}`}: {t.net >= 0 ? '+' : ''}{fmtCr(t.net)}
+                      {t.date ? t.date.slice(0, 6) : `D-${i+1}`}: {fmtCHead(t.net)}
                     </span>
                   ))}
                 </div>
@@ -746,7 +756,8 @@ function FiiSection({ C, isDark }) {
                   <span className="text-[8px]" style={{ color: C.textMuted }}>{fiiData.note}</span>
                 )}
               </div>
-              <div className="rounded-lg overflow-hidden" style={{ border: `1px solid ${C.border}` }}>
+              <div className="rounded-lg" style={{ border: `1px solid ${C.border}` }}>
+                <div className="overflow-x-auto">
                 <table className="w-full text-[9px]">
                   <thead>
                     <tr style={{ background: C.tableBg }}>
@@ -791,6 +802,7 @@ function FiiSection({ C, isDark }) {
                     })}
                   </tbody>
                 </table>
+                </div>
               </div>
             </div>
           )}
