@@ -760,6 +760,159 @@ function computeSMCData(bars) {
   };
 }
 
+// ═══════════════════════════════════════════════════════════════════
+// BLACK BOX INDICATOR
+// Rules (from strategy images):
+//  1. Detect HH/HL (Uptrend) or LH/LL (Downtrend) swing structure
+//  2. Black Box zone = last HL (bull) or last LH (bear) candle zone
+//  3. BOS detected when price breaks above HH (bull) or below LL (bear)
+//  4. After BOS, price returns to Black Box = setup active
+//  5. Confirmation: Pin Bar / Engulfing inside the Box
+//  6. Entry: above Box (bull) or below Box (bear)
+//  7. SL: below Box (bull) or above Box (bear)
+//  8. Target: next HH (bull) or next LL (bear)
+// ═══════════════════════════════════════════════════════════════════
+function computeBlackBox(bars) {
+  if (!bars || bars.length < 15) return null;
+  const n = bars.length;
+
+  // ── Step 1: Detect pivot highs & lows (3-bar) ─────────────────
+  const pivotHighs = [];
+  const pivotLows  = [];
+  const lb = Math.max(2, Math.min(4, Math.floor(n / 25)));
+
+  for (let i = lb; i < n - lb; i++) {
+    let isPH = true, isPL = true;
+    for (let k = 1; k <= lb; k++) {
+      if (bars[i].high < bars[i - k].high || bars[i].high < bars[i + k].high) isPH = false;
+      if (bars[i].low  > bars[i - k].low  || bars[i].low  > bars[i + k].low)  isPL = false;
+    }
+    if (isPH) pivotHighs.push({ price: bars[i].high, idx: i, ts: bars[i].timestamp / 1000, open: bars[i].open, close: bars[i].close, low: bars[i].low });
+    if (isPL) pivotLows.push ({ price: bars[i].low,  idx: i, ts: bars[i].timestamp / 1000, open: bars[i].open, close: bars[i].close, high: bars[i].high });
+  }
+
+  if (pivotHighs.length < 2 || pivotLows.length < 2) return null;
+
+  // ── Step 2: Label HH/LH and HL/LL ─────────────────────────────
+  for (let i = 1; i < pivotHighs.length; i++)
+    pivotHighs[i].label = pivotHighs[i].price > pivotHighs[i - 1].price ? 'HH' : 'LH';
+  pivotHighs[0].label = 'H';
+
+  for (let i = 1; i < pivotLows.length; i++)
+    pivotLows[i].label = pivotLows[i].price > pivotLows[i - 1].price ? 'HL' : 'LL';
+  pivotLows[0].label = 'L';
+
+  // ── Step 3: Determine trend from last 3-4 pivots ──────────────
+  const rH = pivotHighs.slice(-4);
+  const rL = pivotLows.slice(-4);
+
+  const hhCount = rH.filter(h => h.label === 'HH').length;
+  const hlCount = rL.filter(l => l.label === 'HL').length;
+  const lhCount = rH.filter(h => h.label === 'LH').length;
+  const llCount = rL.filter(l => l.label === 'LL').length;
+
+  let trend = 'NEUTRAL';
+  if (hhCount >= 1 && hlCount >= 1) trend = 'UPTREND';
+  else if (lhCount >= 1 && llCount >= 1) trend = 'DOWNTREND';
+
+  // ── Step 4: Find Black Box zone ────────────────────────────────
+  let box = null;
+  const lastHH = [...pivotHighs].reverse().find(h => h.label === 'HH');
+  const lastHL = [...pivotLows].reverse().find(l  => l.label === 'HL');
+  const lastLH = [...pivotHighs].reverse().find(h => h.label === 'LH');
+  const lastLL = [...pivotLows].reverse().find(l  => l.label === 'LL');
+
+  if (trend === 'UPTREND' && lastHL && lastHH) {
+    const boxHigh = Math.max(lastHL.open, lastHL.close);  // body top of HL candle
+    const boxLow  = lastHL.low;                           // wick bottom of HL candle
+    const boxMid  = (boxHigh + boxLow) / 2;
+
+    // BOS: price closed above HH after this HL formed
+    let bos = false, bosTs = null;
+    for (let j = lastHL.idx + 1; j < n; j++) {
+      if (bars[j].close > lastHH.price) { bos = true; bosTs = bars[j].timestamp / 1000; break; }
+    }
+
+    // Price returned to box?
+    const curr = bars[n - 1];
+    const inBox = curr.low <= boxHigh * 1.002 && curr.high >= boxLow * 0.998;
+    const nearBox = curr.low <= boxHigh * 1.015;
+
+    // Confirmation: scan last 5 bars inside/near box
+    let confirm = null;
+    for (let j = Math.max(0, n - 6); j < n; j++) {
+      const b = bars[j];
+      if (b.low > boxHigh * 1.02) continue;
+      const body = Math.abs(b.close - b.open);
+      const range = b.high - b.low || 0.0001;
+      const lWick = Math.min(b.open, b.close) - b.low;
+      if (b.close > b.open && lWick > body * 1.5) { confirm = 'Pin Bar'; break; }
+      if (j > 0) {
+        const p = bars[j - 1];
+        if (p.close < p.open && b.close > b.open && b.close > p.open && b.open < p.close)
+          { confirm = 'Engulfing'; break; }
+      }
+    }
+
+    // Target = next resistance (last HH or higher)
+    const target = lastHH.price;
+    const sl     = boxLow * 0.999;
+
+    box = { type: 'bull', trend, boxHigh, boxLow, boxMid, bos, bosTs,
+            inBox, nearBox, confirm, target, sl,
+            hhPoint: lastHH, hlPoint: lastHL,
+            startTs: bars[Math.max(0, lastHL.idx - 1)].timestamp / 1000,
+            endTs: bars[n - 1].timestamp / 1000 };
+  }
+
+  if (trend === 'DOWNTREND' && lastLH && lastLL) {
+    const boxLow  = Math.min(lastLH.open, lastLH.close);  // body bottom of LH candle
+    const boxHigh = lastLH.high;                          // wick top
+    const boxMid  = (boxHigh + boxLow) / 2;
+
+    let bos = false, bosTs = null;
+    for (let j = lastLH.idx + 1; j < n; j++) {
+      if (bars[j].close < lastLL.price) { bos = true; bosTs = bars[j].timestamp / 1000; break; }
+    }
+
+    const curr = bars[n - 1];
+    const inBox = curr.high >= boxLow * 0.998 && curr.low <= boxHigh * 1.002;
+    const nearBox = curr.high >= boxLow * 0.985;
+
+    let confirm = null;
+    for (let j = Math.max(0, n - 6); j < n; j++) {
+      const b = bars[j];
+      if (b.high < boxLow * 0.98) continue;
+      const body = Math.abs(b.close - b.open);
+      const uWick = b.high - Math.max(b.open, b.close);
+      if (b.close < b.open && uWick > body * 1.5) { confirm = 'Pin Bar'; break; }
+      if (j > 0) {
+        const p = bars[j - 1];
+        if (p.close > p.open && b.close < b.open && b.close < p.open && b.open > p.close)
+          { confirm = 'Engulfing'; break; }
+      }
+    }
+
+    const target = lastLL.price;
+    const sl     = boxHigh * 1.001;
+
+    box = { type: 'bear', trend, boxHigh, boxLow, boxMid, bos, bosTs,
+            inBox, nearBox, confirm, target, sl,
+            lhPoint: lastLH, llPoint: lastLL,
+            startTs: bars[Math.max(0, lastLH.idx - 1)].timestamp / 1000,
+            endTs: bars[n - 1].timestamp / 1000 };
+  }
+
+  // ── All swing labels to draw ───────────────────────────────────
+  const swingLabels = [
+    ...pivotHighs.slice(-8).map(h => ({ ...h, type: 'high' })),
+    ...pivotLows.slice(-8).map(l  => ({ ...l, type: 'low'  })),
+  ].sort((a, b) => a.idx - b.idx);
+
+  return { trend, box, swingLabels };
+}
+
+
 const ChartPanel = ({
   stockData, loading, selectedStock, onPivotSelect, pivotPoint, gannFan,
   semiLogScale, setSemiLogScale, timeframe, onTimeframeChange, isCrypto,
@@ -811,6 +964,11 @@ const ChartPanel = ({
   const [vpEnabled, setVpEnabled] = useState(false);
   const [vpActive, setVpActive] = useState(false);
   const [vpTooltip, setVpTooltip] = useState(null);
+  // Black Box indicator
+  const [bbActive, setBbActive] = useState(false);
+  const bbCanvasRef = useRef(null);
+  const bbAnimRef   = useRef(null);
+  const bbDataRef   = useRef(null);
   // MTF Market Direction — 1H / 45M / 15M
   const [mtfDirection, setMtfDirection] = useState({ '1H': null, '45M': null, '15M': null });
   const { theme } = useTheme();
@@ -2033,6 +2191,229 @@ const ChartPanel = ({
     return () => { if (smcAnimRef.current) cancelAnimationFrame(smcAnimRef.current); };
   }, [smcActive, drawSMCCanvas]);
 
+  // ── Black Box: compute ──────────────────────────────────────────
+  useEffect(() => {
+    if (!bbActive || !stockData?.bars?.length) { bbDataRef.current = null; return; }
+    bbDataRef.current = computeBlackBox(stockData.bars);
+  }, [stockData, bbActive]);
+
+  // ── Black Box: draw canvas ──────────────────────────────────────
+  const drawBBCanvas = useCallback(() => {
+    const canvas = bbCanvasRef.current;
+    const chart  = chartRef.current;
+    const series = candlestickSeriesRef.current;
+    const bbData = bbDataRef.current;
+    if (!canvas || !chart || !series) return;
+    const container = chartContainerRef.current;
+    if (!container) return;
+
+    const W = container.clientWidth;
+    const H = container.clientHeight;
+    const dpr = window.devicePixelRatio || 1;
+    if (canvas.width !== Math.round(W * dpr) || canvas.height !== Math.round(H * dpr)) {
+      canvas.width  = Math.round(W * dpr);
+      canvas.height = Math.round(H * dpr);
+      canvas.style.width  = `${W}px`;
+      canvas.style.height = `${H}px`;
+    }
+
+    const ctx = canvas.getContext('2d');
+    ctx.save();
+    ctx.scale(dpr, dpr);
+    ctx.clearRect(0, 0, W, H);
+
+    if (!bbData) { ctx.restore(); return; }
+
+    let ts;
+    try { ts = chart.timeScale(); } catch (e) { ctx.restore(); return; }
+    const toX = t => { try { return ts.timeToCoordinate(t);  } catch { return null; } };
+    const toY = p => { try { return series.priceToCoordinate(p); } catch { return null; } };
+
+    const { trend, box, swingLabels } = bbData;
+
+    // ── Draw swing labels (HH / HL / LH / LL) ─────────────────
+    (swingLabels || []).forEach(sw => {
+      const x = toX(sw.ts);
+      const y = sw.type === 'high' ? toY(sw.price) : toY(sw.price);
+      if (x == null || y == null) return;
+      const lbl = sw.label || '';
+      if (!['HH','HL','LH','LL'].includes(lbl)) return;
+      const isBull = lbl === 'HH' || lbl === 'HL';
+      ctx.save();
+      ctx.font = 'bold 8px monospace';
+      ctx.fillStyle = isBull ? 'rgba(34,197,94,0.95)' : 'rgba(248,113,113,0.95)';
+      const offset = sw.type === 'high' ? -10 : 10;
+      ctx.fillText(lbl, x - 8, y + offset);
+      // Small dot at pivot
+      ctx.beginPath();
+      ctx.arc(x, y, 2, 0, Math.PI * 2);
+      ctx.fillStyle = isBull ? 'rgba(34,197,94,0.7)' : 'rgba(248,113,113,0.7)';
+      ctx.fill();
+      ctx.restore();
+    });
+
+    if (!box) {
+      // Draw trend label even when no box
+      ctx.save();
+      ctx.font = 'bold 9px monospace';
+      ctx.fillStyle = 'rgba(148,163,184,0.7)';
+      ctx.fillText(`BB: ${trend}`, 8, 18);
+      ctx.restore();
+      ctx.restore();
+      return;
+    }
+
+    const isBull = box.type === 'bull';
+    const xStart = toX(box.startTs);
+    const xEnd   = toX(box.endTs);
+    const yHigh  = toY(box.boxHigh);
+    const yLow   = toY(box.boxLow);
+    const yMid   = toY(box.boxMid);
+    const yTarget = toY(box.target);
+    const ySL     = toY(box.sl);
+
+    if (xStart == null || xEnd == null || yHigh == null || yLow == null) {
+      ctx.restore(); return;
+    }
+
+    const left = Math.min(xStart, xEnd);
+    const boxW = Math.max(8, Math.abs(xEnd - xStart));
+    const top  = Math.min(yHigh, yLow);
+    const boxH = Math.max(4, Math.abs(yHigh - yLow));
+
+    // ── BLACK BOX rectangle ────────────────────────────────────
+    ctx.save();
+    // Dark fill
+    ctx.fillStyle   = isBull ? 'rgba(15,40,20,0.75)' : 'rgba(40,10,10,0.75)';
+    ctx.strokeStyle = isBull ? 'rgba(34,197,94,0.85)' : 'rgba(248,113,113,0.85)';
+    ctx.lineWidth   = 1.5;
+    ctx.fillRect(left, top, boxW, boxH);
+    ctx.strokeRect(left, top, boxW, boxH);
+
+    // Bold "BLACK BOX" label inside the rectangle
+    ctx.fillStyle = isBull ? 'rgba(34,197,94,0.95)' : 'rgba(248,113,113,0.95)';
+    ctx.font      = 'bold 8px monospace';
+    ctx.fillText('BLACK BOX', left + 4, top + 12);
+
+    // Trend + confirmation label
+    const statusLabel = box.confirm ? `✓ ${box.confirm}` : (box.inBox ? 'Price in Box' : (box.nearBox ? 'Near Zone' : ''));
+    if (statusLabel) {
+      ctx.font = 'bold 7px monospace';
+      ctx.fillStyle = box.confirm ? 'rgba(250,204,21,0.95)' : 'rgba(148,163,184,0.8)';
+      ctx.fillText(statusLabel, left + 4, top + 22);
+    }
+
+    // Midpoint dashed line inside box
+    if (yMid != null) {
+      ctx.setLineDash([3, 3]);
+      ctx.strokeStyle = isBull ? 'rgba(34,197,94,0.4)' : 'rgba(248,113,113,0.4)';
+      ctx.lineWidth   = 0.8;
+      ctx.beginPath();
+      ctx.moveTo(left, yMid);
+      ctx.lineTo(left + boxW, yMid);
+      ctx.stroke();
+      ctx.setLineDash([]);
+      ctx.fillStyle = 'rgba(148,163,184,0.6)';
+      ctx.font = '6px monospace';
+      ctx.fillText('50%', left + boxW + 2, yMid + 2);
+    }
+    ctx.restore();
+
+    // ── BOS horizontal line ────────────────────────────────────
+    if (box.bos) {
+      const bosPrice = isBull ? box.hhPoint?.price : box.llPoint?.price;
+      if (bosPrice != null) {
+        const yBOS = toY(bosPrice);
+        if (yBOS != null) {
+          ctx.save();
+          ctx.setLineDash([5, 4]);
+          ctx.strokeStyle = 'rgba(251,191,36,0.85)';
+          ctx.lineWidth   = 1.2;
+          ctx.beginPath();
+          ctx.moveTo(0, yBOS);
+          ctx.lineTo(W, yBOS);
+          ctx.stroke();
+          ctx.setLineDash([]);
+          ctx.fillStyle = 'rgba(251,191,36,0.95)';
+          ctx.font      = 'bold 8px monospace';
+          ctx.fillText('BOS', W - 38, yBOS - 2);
+          ctx.restore();
+        }
+      }
+    }
+
+    // ── Target line (green dashed) ─────────────────────────────
+    if (yTarget != null) {
+      ctx.save();
+      ctx.setLineDash([4, 4]);
+      ctx.strokeStyle = 'rgba(34,197,94,0.70)';
+      ctx.lineWidth   = 1;
+      ctx.beginPath();
+      ctx.moveTo(left, yTarget);
+      ctx.lineTo(W, yTarget);
+      ctx.stroke();
+      ctx.setLineDash([]);
+      ctx.fillStyle = 'rgba(34,197,94,0.95)';
+      ctx.font      = 'bold 8px monospace';
+      const tLabel = isBull ? `▲ Target ${box.target?.toFixed(0)}` : `▼ Target ${box.target?.toFixed(0)}`;
+      ctx.fillText(tLabel, W - 5 - ctx.measureText(tLabel).width, yTarget - 2);
+      ctx.restore();
+    }
+
+    // ── SL line (red dashed) ───────────────────────────────────
+    if (ySL != null) {
+      ctx.save();
+      ctx.setLineDash([4, 4]);
+      ctx.strokeStyle = 'rgba(239,68,68,0.70)';
+      ctx.lineWidth   = 1;
+      ctx.beginPath();
+      ctx.moveTo(left, ySL);
+      ctx.lineTo(W, ySL);
+      ctx.stroke();
+      ctx.setLineDash([]);
+      ctx.fillStyle = 'rgba(239,68,68,0.95)';
+      ctx.font      = 'bold 8px monospace';
+      const slLabel = `✕ SL ${box.sl?.toFixed(0)}`;
+      ctx.fillText(slLabel, W - 5 - ctx.measureText(slLabel).width, ySL + 10);
+      ctx.restore();
+    }
+
+    // ── Entry arrow ────────────────────────────────────────────
+    if (box.inBox || box.nearBox) {
+      const entryY = isBull ? yLow : yHigh;
+      if (entryY != null) {
+        ctx.save();
+        ctx.fillStyle = isBull ? 'rgba(34,197,94,0.95)' : 'rgba(248,113,113,0.95)';
+        ctx.font      = 'bold 9px monospace';
+        const eLabel  = isBull ? `▲ ENTRY` : `▼ ENTRY`;
+        ctx.fillText(eLabel, left + boxW + 4, entryY + (isBull ? 2 : -2));
+        ctx.restore();
+      }
+    }
+
+    // ── Trend label top-left ───────────────────────────────────
+    ctx.save();
+    ctx.font      = 'bold 9px monospace';
+    ctx.fillStyle = isBull ? 'rgba(34,197,94,0.9)' : 'rgba(248,113,113,0.9)';
+    ctx.fillText(`BB: ${trend}`, 8, 18);
+    ctx.restore();
+
+    ctx.restore();
+  }, []);
+
+  // ── Black Box: animation loop ───────────────────────────────────
+  useEffect(() => {
+    if (!bbActive) {
+      if (bbAnimRef.current) cancelAnimationFrame(bbAnimRef.current);
+      const c = bbCanvasRef.current;
+      if (c) { const ctx = c.getContext('2d'); ctx.clearRect(0, 0, c.width, c.height); }
+      return;
+    }
+    const loop = () => { drawBBCanvas(); bbAnimRef.current = requestAnimationFrame(loop); };
+    bbAnimRef.current = requestAnimationFrame(loop);
+    return () => { if (bbAnimRef.current) cancelAnimationFrame(bbAnimRef.current); };
+  }, [bbActive, drawBBCanvas]);
+
   useEffect(() => {
     if (showGannLines && pivotPoint && stockData) {
       setTimeout(() => drawGannLines(pivotPoint, lineExtension), 50);
@@ -2325,6 +2706,19 @@ const ChartPanel = ({
               </div>
             )}
           </div>
+          {/* Black Box indicator toggle */}
+          <button
+            onClick={() => setBbActive(v => !v)}
+            className={`px-2 py-1 text-[10px] font-bold uppercase tracking-wider transition-all whitespace-nowrap shrink-0 border ${
+              bbActive
+                ? 'text-[#a78bfa] border-[#a78bfa]/40 bg-[#a78bfa]/8'
+                : 'text-zinc-500 border-transparent'
+            }`}
+            data-testid="bb-toggle"
+            title="Black Box — HH/HL/LH/LL structure + BOS + Entry/SL/Target"
+          >
+            BB
+          </button>
           {/* Volume Profile toggle — POC, VAH, VAL auto-mark */}
           <button
             onClick={() => setVpEnabled(v => !v)}
@@ -2702,6 +3096,17 @@ const ChartPanel = ({
             zIndex: 4,
             pointerEvents: 'none',
             display: smcActive ? 'block' : 'none',
+          }}
+        />
+
+        {/* Black Box Canvas — overlaid above SMC */}
+        <canvas
+          ref={bbCanvasRef}
+          style={{
+            position: 'absolute', left: 0, top: 0,
+            zIndex: 5,
+            pointerEvents: 'none',
+            display: bbActive ? 'block' : 'none',
           }}
         />
 
