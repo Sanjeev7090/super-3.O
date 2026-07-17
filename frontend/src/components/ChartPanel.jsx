@@ -2283,15 +2283,15 @@ const ChartPanel = ({
 
     // ── BLACK BOX rectangle ────────────────────────────────────
     ctx.save();
-    // Dark fill
-    ctx.fillStyle   = isBull ? 'rgba(15,40,20,0.75)' : 'rgba(40,10,10,0.75)';
-    ctx.strokeStyle = isBull ? 'rgba(34,197,94,0.85)' : 'rgba(248,113,113,0.85)';
-    ctx.lineWidth   = 1.5;
+    // Pure dark-black transparent fill (exactly like image)
+    ctx.fillStyle   = 'rgba(0, 0, 0, 0.62)';
+    ctx.strokeStyle = isBull ? 'rgba(34,197,94,0.95)' : 'rgba(248,113,113,0.95)';
+    ctx.lineWidth   = 1.8;
     ctx.fillRect(left, top, boxW, boxH);
     ctx.strokeRect(left, top, boxW, boxH);
 
-    // Bold "BLACK BOX" label inside the rectangle
-    ctx.fillStyle = isBull ? 'rgba(34,197,94,0.95)' : 'rgba(248,113,113,0.95)';
+    // "BLACK BOX" label in white
+    ctx.fillStyle = 'rgba(255,255,255,0.90)';
     ctx.font      = 'bold 8px monospace';
     ctx.fillText('BLACK BOX', left + 4, top + 12);
 
@@ -2306,14 +2306,14 @@ const ChartPanel = ({
     // Midpoint dashed line inside box
     if (yMid != null) {
       ctx.setLineDash([3, 3]);
-      ctx.strokeStyle = isBull ? 'rgba(34,197,94,0.4)' : 'rgba(248,113,113,0.4)';
+      ctx.strokeStyle = 'rgba(255,255,255,0.30)';
       ctx.lineWidth   = 0.8;
       ctx.beginPath();
       ctx.moveTo(left, yMid);
       ctx.lineTo(left + boxW, yMid);
       ctx.stroke();
       ctx.setLineDash([]);
-      ctx.fillStyle = 'rgba(148,163,184,0.6)';
+      ctx.fillStyle = 'rgba(200,200,200,0.6)';
       ctx.font = '6px monospace';
       ctx.fillText('50%', left + boxW + 2, yMid + 2);
     }
