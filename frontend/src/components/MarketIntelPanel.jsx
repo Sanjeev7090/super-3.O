@@ -47,9 +47,11 @@ const MarketIntelPanel = ({ onClose }) => {
   const [loading, setLoading] = useState(true);
   const [error,   setError]   = useState(null);
   const [ts,      setTs]      = useState(null);
-  const [brentTf, setBrentTf] = useState('D');
-  const [vixTf,   setVixTf]   = useState('D');
+  const [brentTf,  setBrentTf]  = useState('D');
+  const [vixTf,    setVixTf]    = useState('D');
   const [nasdaqTf, setNasdaqTf] = useState('D');
+  const [niftyTf,  setNiftyTf]  = useState('D');
+  const [giftTf,   setGiftTf]   = useState('D');
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -78,6 +80,12 @@ const MarketIntelPanel = ({ onClose }) => {
   const nasdaqChg = nasdaqTf === 'W' ? data?.nasdaq_chg_week
                   : nasdaqTf === 'M' ? data?.nasdaq_chg_month
                   : data?.nasdaq_chg_pct;
+  const niftyChg  = niftyTf === 'W' ? data?.nifty_chg_week
+                  : niftyTf === 'M' ? data?.nifty_chg_month
+                  : data?.nifty_chg_pct;
+  const giftChg   = giftTf === 'W' ? data?.gift_chg_week
+                  : giftTf === 'M' ? data?.gift_chg_month
+                  : null; // Day = just show premium
 
   const chgColor = (v) =>
     v > 0 ? '#22c55e' : v < 0 ? '#ef4444' : C.textMuted;
@@ -246,13 +254,23 @@ const MarketIntelPanel = ({ onClose }) => {
                   sub: fmtPct(data.nifty_chg_pct),
                   subColor: chgColor(data.nifty_chg_pct),
                   icon: <TrendUp size={14} />,
+                  tf: niftyTf, setTf: setNiftyTf,
+                  tfSub: niftyTf === 'D' ? fmtPct(niftyChg) + ' (Day)'
+                       : niftyTf === 'W' ? fmtPct(niftyChg) + ' (Week)'
+                       : fmtPct(niftyChg) + ' (Month)',
+                  tfSubColor: chgColor(niftyChg),
                 },
                 {
                   label: 'GIFT Nifty',
                   value: fmt(data.gift_nifty, 0),
-                  sub: `Premium: ${data.gift_premium > 0 ? '+' : ''}${fmt(data.gift_premium, 0)}`,
-                  subColor: data.gift_premium >= 0 ? '#22c55e' : '#ef4444',
+                  sub: giftTf === 'D'
+                    ? `Premium: ${data.gift_premium > 0 ? '+' : ''}${fmt(data.gift_premium, 0)}`
+                    : fmtPct(giftChg) + (giftTf === 'W' ? ' (Week)' : ' (Month)'),
+                  subColor: giftTf === 'D'
+                    ? (data.gift_premium >= 0 ? '#22c55e' : '#ef4444')
+                    : chgColor(giftChg),
                   icon: <Globe size={14} />,
+                  tf: giftTf, setTf: setGiftTf,
                 },
                 {
                   label: 'Regulatory',
@@ -270,11 +288,20 @@ const MarketIntelPanel = ({ onClose }) => {
                   icon: <Gauge size={14} />,
                   valueColor: data.bias_color,
                 },
-              ].map(({ label, value, sub, subColor, icon, valueColor }) => (
+              ].map(({ label, value, sub, subColor, icon, valueColor, tf, setTf }) => (
                 <div key={label} className="rounded-xl p-3" style={{ background: C.cardBg, border: `1px solid ${C.border}` }}>
-                  <div className="flex items-center gap-1.5 text-[9px] mb-1.5" style={{ color: C.textMuted }}>
-                    {icon}
-                    <span className="uppercase tracking-widest">{label}</span>
+                  <div className="flex items-center justify-between mb-1.5">
+                    <div className="flex items-center gap-1.5 text-[9px]" style={{ color: C.textMuted }}>
+                      {icon}
+                      <span className="uppercase tracking-widest">{label}</span>
+                    </div>
+                    {tf !== undefined && (
+                      <div className="flex items-center gap-0.5">
+                        {['D','W','M'].map(t => (
+                          <TfPill key={t} value={t} active={tf === t} onClick={() => setTf(t)} />
+                        ))}
+                      </div>
+                    )}
                   </div>
                   <div className="text-sm font-bold font-mono" style={{ color: valueColor || C.textPrimary }}>{value}</div>
                   <div className="text-[10px] mt-0.5 font-mono" style={{ color: subColor }}>{sub}</div>
