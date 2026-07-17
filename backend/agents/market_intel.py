@@ -251,25 +251,6 @@ def _fetch_gift_nifty(nifty_price: float) -> float:
     return nifty_price
 
 
-# ── VIX 52-week History ────────────────────────────────────────────────────────
-
-def _fetch_vix_history() -> Dict:
-    """Fetch India VIX 52-week high/low from yfinance history."""
-    import yfinance as yf
-    try:
-        hist = yf.Ticker("^INDIAVIX").history(period="1y")
-        if hist.empty:
-            return {}
-        closes = hist["Close"].dropna()
-        return {
-            "vix_52w_high": round(float(closes.max()), 2),
-            "vix_52w_low":  round(float(closes.min()), 2),
-        }
-    except Exception as e:
-        logger.debug(f"VIX 52w history fetch failed: {e}")
-        return {}
-
-
 def _calc_vix_percentile(vix: float, low: float, high: float) -> float:
     if not low or not high or high == low:
         return 50.0
@@ -313,25 +294,61 @@ def _next_expiry_info() -> Dict:
             "is_today":    days == 0,
         }
 
+
     return result
 
 
-# ── VIX 52-week History ────────────────────────────────────────────────────────
+# ── VIX 52-week History + Period Changes ──────────────────────────────────────
 
 def _fetch_vix_history() -> Dict:
-    """Fetch India VIX 52-week high/low from yfinance history."""
+    """Fetch India VIX 52-week high/low + weekly/monthly changes."""
     import yfinance as yf
     try:
         hist = yf.Ticker("^INDIAVIX").history(period="1y")
         if hist.empty:
             return {}
         closes = hist["Close"].dropna()
+        current = float(closes.iloc[-1])
+
+        def _pct(n: int) -> Optional[float]:
+            if len(closes) > n:
+                prev = float(closes.iloc[-n - 1])
+                return round((current - prev) / prev * 100, 2) if prev else None
+            return None
+
         return {
-            "vix_52w_high": round(float(closes.max()), 2),
-            "vix_52w_low":  round(float(closes.min()), 2),
+            "vix_52w_high":  round(float(closes.max()), 2),
+            "vix_52w_low":   round(float(closes.min()), 2),
+            "vix_chg_week":  _pct(5),
+            "vix_chg_month": _pct(21),
         }
     except Exception as e:
-        logger.debug(f"VIX 52w history fetch failed: {e}")
+        logger.debug(f"VIX history fetch failed: {e}")
+        return {}
+
+
+def _fetch_brent_history() -> Dict:
+    """Fetch Brent Crude weekly/monthly change."""
+    import yfinance as yf
+    try:
+        hist = yf.Ticker("BZ=F").history(period="3mo")
+        if hist.empty:
+            return {}
+        closes = hist["Close"].dropna()
+        current = float(closes.iloc[-1])
+
+        def _pct(n: int) -> Optional[float]:
+            if len(closes) > n:
+                prev = float(closes.iloc[-n - 1])
+                return round((current - prev) / prev * 100, 2) if prev else None
+            return None
+
+        return {
+            "brent_chg_week":  _pct(5),
+            "brent_chg_month": _pct(21),
+        }
+    except Exception as e:
+        logger.debug(f"Brent history fetch failed: {e}")
         return {}
 
 
@@ -436,11 +453,12 @@ async def fetch_market_intel() -> Dict:
     vix_chg   = yf_data.get("vix_chg_pct", 0.0)
     nifty_chg = yf_data.get("nifty_chg_pct", 0.0)
 
-    # GIFT Nifty + VIX history + expiry (parallel executor tasks)
-    gift_task    = loop.run_in_executor(None, _fetch_gift_nifty, nifty)
-    vix_hist_task = loop.run_in_executor(None, _fetch_vix_history)
+    # GIFT Nifty + VIX history + Brent history + expiry (parallel)
+    gift_task      = loop.run_in_executor(None, _fetch_gift_nifty, nifty)
+    vix_hist_task  = loop.run_in_executor(None, _fetch_vix_history)
+    brent_hist_task = loop.run_in_executor(None, _fetch_brent_history)
 
-    gift_nifty, vix_hist = await asyncio.gather(gift_task, vix_hist_task)
+    gift_nifty, vix_hist, brent_hist = await asyncio.gather(gift_task, vix_hist_task, brent_hist_task)
 
     # Expiry countdown (pure datetime math, no I/O)
     expiry_info = _next_expiry_info()
@@ -477,35 +495,39 @@ async def fetch_market_intel() -> Dict:
 
     data = {
         # Live values
-        "brent":           round(brent, 2),
-        "brent_chg_pct":   brent_chg,
-        "vix":             round(vix, 2),
-        "vix_chg_pct":     vix_chg,
-        "nifty":           round(nifty, 2),
-        "nifty_chg_pct":   nifty_chg,
-        "gift_nifty":      round(gift_nifty, 2),
-        "gift_premium":    gift_premium,
-        "regulatory":      regulatory,
+        "brent":             round(brent, 2),
+        "brent_chg_pct":     brent_chg,
+        "brent_chg_week":    brent_hist.get("brent_chg_week"),
+        "brent_chg_month":   brent_hist.get("brent_chg_month"),
+        "vix":               round(vix, 2),
+        "vix_chg_pct":       vix_chg,
+        "vix_chg_week":      vix_hist.get("vix_chg_week"),
+        "vix_chg_month":     vix_hist.get("vix_chg_month"),
+        "nifty":             round(nifty, 2),
+        "nifty_chg_pct":     nifty_chg,
+        "gift_nifty":        round(gift_nifty, 2),
+        "gift_premium":      gift_premium,
+        "regulatory":        regulatory,
 
         # VIX 52-week
-        "vix_52w_high":    vix_52w_high,
-        "vix_52w_low":     vix_52w_low,
-        "vix_percentile":  vix_percentile,
-        "vix_zone":        vix_zone,
-        "vix_zone_color":  vix_zone_color,
+        "vix_52w_high":      vix_52w_high,
+        "vix_52w_low":       vix_52w_low,
+        "vix_percentile":    vix_percentile,
+        "vix_zone":          vix_zone,
+        "vix_zone_color":    vix_zone_color,
 
         # Expiry countdown
         "expiry": expiry_info,
 
         # Decision output
-        "bias":            bias["label"],
-        "bias_color":      bias["color"],
-        "move_label":      bias["move_label"],
-        "move_min":        bias["move_min"],
-        "move_max":        bias["move_max"],
-        "probability":     bias["probability"],
-        "action":          bias["action"],
-        "gift_color_label":bias["gift_color"],
+        "bias":              bias["label"],
+        "bias_color":        bias["color"],
+        "move_label":        bias["move_label"],
+        "move_min":          bias["move_min"],
+        "move_max":          bias["move_max"],
+        "probability":       bias["probability"],
+        "action":            bias["action"],
+        "gift_color_label":  bias["gift_color"],
 
         # Factor scores
         "scores": {

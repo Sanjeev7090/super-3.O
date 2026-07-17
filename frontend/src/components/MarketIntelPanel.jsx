@@ -81,11 +81,36 @@ const MarketIntelPanel = ({ onClose }) => {
     }
   }, []);
 
+  const [brentTf, setBrentTf] = useState('D');
+  const [vixTf,   setVixTf]   = useState('D');
+
   useEffect(() => { load(); }, [load]);
 
   const activeRow = data
     ? ROWS.findIndex(r => r.label === data.bias)
     : -1;
+
+  // Timeframe-aware change % picker
+  const brentChg = brentTf === 'W' ? data?.brent_chg_week
+                 : brentTf === 'M' ? data?.brent_chg_month
+                 : data?.brent_chg_pct;
+  const vixChg   = vixTf === 'W' ? data?.vix_chg_week
+                 : vixTf === 'M' ? data?.vix_chg_month
+                 : data?.vix_chg_pct;
+
+  const TfPill = ({ value, active, onClick }) => (
+    <button
+      onClick={onClick}
+      className="px-1.5 py-0.5 rounded text-[9px] font-bold transition-all"
+      style={{
+        background: active ? 'rgba(255,255,255,0.15)' : 'transparent',
+        color:      active ? '#fff' : '#52525b',
+        border:     active ? '1px solid rgba(255,255,255,0.2)' : '1px solid transparent',
+      }}
+    >
+      {value}
+    </button>
+  );
 
   return (
     <div
@@ -150,24 +175,58 @@ const MarketIntelPanel = ({ onClose }) => {
 
             {/* Live Data Strip */}
             <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-3">
+
+              {/* Brent Crude — with D/W/M toggle */}
+              <div className="rounded-xl p-3 border border-white/8" style={{ background: '#181c27' }}>
+                <div className="flex items-center justify-between mb-1.5">
+                  <div className="flex items-center gap-1.5 text-[9px] text-zinc-500">
+                    <ChartLine size={12} />
+                    <span className="uppercase tracking-widest">Brent Crude</span>
+                  </div>
+                  <div className="flex items-center gap-0.5">
+                    {['D','W','M'].map(t => (
+                      <TfPill key={t} value={t} active={brentTf === t} onClick={() => setBrentTf(t)} />
+                    ))}
+                  </div>
+                </div>
+                <div className="text-sm font-bold font-mono text-white">${fmt(data.brent)}</div>
+                <div className={`text-[10px] mt-0.5 ${chgColor(brentChg)}`}>
+                  {fmtPct(brentChg)} {brentTf === 'D' ? '(Day)' : brentTf === 'W' ? '(Week)' : '(Month)'}
+                </div>
+              </div>
+
+              {/* India VIX — with D/W/M toggle */}
+              <div className="rounded-xl p-3 border border-white/8" style={{ background: '#181c27' }}>
+                <div className="flex items-center justify-between mb-1.5">
+                  <div className="flex items-center gap-1.5 text-[9px] text-zinc-500">
+                    <Gauge size={12} />
+                    <span className="uppercase tracking-widest">India VIX</span>
+                  </div>
+                  <div className="flex items-center gap-0.5">
+                    {['D','W','M'].map(t => (
+                      <TfPill key={t} value={t} active={vixTf === t} onClick={() => setVixTf(t)} />
+                    ))}
+                  </div>
+                </div>
+                <div className="text-sm font-bold font-mono text-white">{fmt(data.vix)}</div>
+                <div className={`text-[10px] mt-0.5 ${chgColor(vixChg)}`}>
+                  {fmtPct(vixChg)} {vixTf === 'D' ? '(Day)' : vixTf === 'W' ? '(Week)' : '(Month)'}
+                </div>
+              </div>
+
+              {/* Remaining 4 cards */}
               {[
-                { label: 'Brent Crude', value: `$${fmt(data.brent)}`, sub: fmtPct(data.brent_chg_pct), subColor: chgColor(data.brent_chg_pct), icon: <ChartLine size={14} /> },
-                { label: 'India VIX',   value: fmt(data.vix),         sub: fmtPct(data.vix_chg_pct),   subColor: chgColor(data.vix_chg_pct),   icon: <Gauge size={14} /> },
-                { label: 'Nifty 50',    value: fmt(data.nifty, 0),    sub: fmtPct(data.nifty_chg_pct), subColor: chgColor(data.nifty_chg_pct), icon: <TrendUp size={14} /> },
-                { label: 'GIFT Nifty',  value: fmt(data.gift_nifty, 0), sub: `Premium: ${data.gift_premium > 0 ? '+' : ''}${fmt(data.gift_premium, 0)}`, subColor: data.gift_premium >= 0 ? 'text-emerald-400' : 'text-red-400', icon: <Globe size={14} /> },
-                { label: 'Regulatory',  value: data.regulatory,       sub: 'SEBI/NSE',                 subColor: 'text-zinc-500',               icon: <Gauge size={14} />, valueColor: data.regulatory === 'Positive' ? '#22c55e' : data.regulatory === 'Negative' ? '#ef4444' : '#94a3b8' },
-                { label: 'Bias',        value: data.bias,             sub: `Score: ${data.scores?.total}`, subColor: 'text-zinc-500', icon: <Gauge size={14} />, valueColor: data.bias_color },
+                { label: 'Nifty 50',   value: fmt(data.nifty, 0),      sub: fmtPct(data.nifty_chg_pct), subColor: chgColor(data.nifty_chg_pct), icon: <TrendUp size={14} /> },
+                { label: 'GIFT Nifty', value: fmt(data.gift_nifty, 0), sub: `Premium: ${data.gift_premium > 0 ? '+' : ''}${fmt(data.gift_premium, 0)}`, subColor: data.gift_premium >= 0 ? 'text-emerald-400' : 'text-red-400', icon: <Globe size={14} /> },
+                { label: 'Regulatory', value: data.regulatory,         sub: 'SEBI/NSE', subColor: 'text-zinc-500', icon: <Gauge size={14} />, valueColor: data.regulatory === 'Positive' ? '#22c55e' : data.regulatory === 'Negative' ? '#ef4444' : '#94a3b8' },
+                { label: 'Bias',       value: data.bias,               sub: `Score: ${data.scores?.total}`, subColor: 'text-zinc-500', icon: <Gauge size={14} />, valueColor: data.bias_color },
               ].map(({ label, value, sub, subColor, icon, valueColor }) => (
-                <div key={label}
-                  className="rounded-xl p-3 border border-white/8"
-                  style={{ background: '#181c27' }}>
+                <div key={label} className="rounded-xl p-3 border border-white/8" style={{ background: '#181c27' }}>
                   <div className="flex items-center gap-1.5 text-[9px] text-zinc-500 mb-1.5">
                     {icon}
                     <span className="uppercase tracking-widest">{label}</span>
                   </div>
-                  <div className="text-sm font-bold font-mono" style={{ color: valueColor || '#fff' }}>
-                    {value}
-                  </div>
+                  <div className="text-sm font-bold font-mono" style={{ color: valueColor || '#fff' }}>{value}</div>
                   <div className={`text-[10px] mt-0.5 ${subColor}`}>{sub}</div>
                 </div>
               ))}
