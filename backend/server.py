@@ -1250,6 +1250,8 @@ async def get_indices_live():
         {"key": "NIFTY",     "name": "NIFTY 50",   "ticker": "^NSEI",    "symbol": "NIFTY",     "groww_sym": "NIFTY",     "groww_exch": "NSE"},
         {"key": "SENSEX",    "name": "SENSEX",     "ticker": "^BSESN",   "symbol": "SENSEX",    "groww_sym": "SENSEX",    "groww_exch": "BSE"},
         {"key": "BANKNIFTY", "name": "BANK NIFTY", "ticker": "^NSEBANK", "symbol": "BANKNIFTY", "groww_sym": "BANKNIFTY", "groww_exch": "NSE"},
+        {"key": "SP500",     "name": "S&P 500",    "ticker": "^GSPC",    "symbol": "SP500",     "groww_sym": None,        "groww_exch": None, "us": True},
+        {"key": "NASDAQ",    "name": "NASDAQ",     "ticker": "^IXIC",    "symbol": "NASDAQ",    "groww_sym": None,        "groww_exch": None, "us": True},
     ]
     cache_key = "indices_live"
     if cache_key in cache_storage:
@@ -1280,13 +1282,13 @@ async def get_indices_live():
     results = []
     for idx in indices:
         try:
-            gp = groww_prices.get(idx["key"])
+            gp = groww_prices.get(idx["key"]) if not idx.get("us") else None
             if gp and gp["price"] > 0:
                 price = gp["price"]
                 prev  = gp["prev"] or price
                 data_src = "groww"
             else:
-                # Fallback: yfinance
+                # yfinance fallback (also primary for US indices)
                 t = yf.Ticker(idx["ticker"])
                 try:
                     info = t.fast_info
