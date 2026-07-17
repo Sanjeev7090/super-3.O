@@ -61,6 +61,9 @@ const IndicesTickerBar = ({ onIndexClick }) => {
     const wsTick    = wsSym ? wsTicks[wsSym] : null;
     const price     = wsTick?.price       ?? idx.price;
     const changePct = wsTick?.change_pct  ?? idx.change_pct;
+    const changeAbs = (price > 0 && changePct != null)
+      ? (price * changePct / 100)
+      : (idx.change || 0);
     const isUp      = (changePct ?? 0) >= 0;
     const isLive    = !!wsTick;
     const isUs      = !!idx.us;
@@ -104,14 +107,25 @@ const IndicesTickerBar = ({ onIndexClick }) => {
           >
             {priceStr}
           </span>
-          <span
-            className={`text-[10px] md:text-xs font-bold font-mono flex items-center gap-0.5 ${
-              isUp ? 'text-[#34C759]' : 'text-[#FF3B30]'
-            }`}
-          >
-            {isUp ? <CaretUp size={10} weight="fill" /> : <CaretDown size={10} weight="fill" />}
-            {Math.abs(changePct || 0).toFixed(2)}%
-          </span>
+          <div className="flex flex-col items-start">
+            <span
+              className={`text-[10px] md:text-xs font-bold font-mono flex items-center gap-0.5 ${
+                isUp ? 'text-[#34C759]' : 'text-[#FF3B30]'
+              }`}
+            >
+              {isUp ? <CaretUp size={10} weight="fill" /> : <CaretDown size={10} weight="fill" />}
+              {Math.abs(changePct || 0).toFixed(2)}%
+            </span>
+            <span
+              className={`text-[8px] font-mono leading-none ${
+                isUp ? 'text-[#34C759]/80' : 'text-[#FF3B30]/80'
+              }`}
+            >
+              {isUp ? '+' : ''}{Math.abs(changeAbs) >= 1000
+                ? changeAbs.toFixed(0)
+                : changeAbs.toFixed(isUs ? 2 : 1)} pts
+            </span>
+          </div>
         </div>
       </button>
     );
