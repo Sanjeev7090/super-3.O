@@ -13217,6 +13217,15 @@ async def startup_binance_ws():
         logging.info("NSE Tick Streamer started")
     except Exception as _te:
         logging.warning(f"NSE Tick Streamer startup failed: {_te}")
+    # Pre-warm Market Intelligence cache so first user request is instant
+    async def _warm_market_intel():
+        try:
+            from agents.market_intel import fetch_market_intel
+            await fetch_market_intel()
+            logging.info("Market Intelligence cache warmed on startup")
+        except Exception as _me:
+            logging.warning(f"Market Intel warm-up failed: {_me}")
+    asyncio.create_task(_warm_market_intel())
 
 
 # ── NSE Tick WebSocket ────────────────────────────────────────────────────────

@@ -1,44 +1,47 @@
-<analysis>**original_problem_statement**: Clone the GitHub repository  100% same to same. Subsequently, the user requested bug fixes for the Volume Profile/Footprint not working on Nifty 50/options/crypto, UI cleanup on the Chart panel (removing legend texts), and fixing a bug where candles disappear when changing timeframes for Nifty 50.
+<analysis>**original_problem_statement**: Clone the GitHub repository  100% same to same. Over the course of the session, the user added features: replacing old RSS news with a comprehensive Market Intelligence panel (Brent, VIX, Expiry, Bias), strict image-based validation for Smart Money Concepts (SMC) order blocks, historical candle limit expansion (from 120 days to 2 years), and a new custom Canvas-drawn Black Box indicator showing swing trends, BOS lines, and target zones.
 
-**User's preferred language**: The user is communicating in Hinglish (Hindi + English). **INSTRUCT NEXT AGENT: You MUST respond to the user in Hinglish/Hindi.**
+**User's preferred language**: (INSTRUCT NEXT AGENT: You MUST respond to the user in **Hinglish/Hindi** only).
 
-**what currently exists?**: A fully functional, cloned full-stack trading application (React + FastAPI + MongoDB) running successfully. The application has synthetic volume logic integrated for zero-volume option/index bars to display footprint/volume profiles, corrected timeframe interval mapping, and cleaned-up chart legends.
+**what currently exists?**: A fully functional React + FastAPI + MongoDB trading dashboard. It now features an advanced Market Intelligence sidebar with live D/W/M toggles for Brent/VIX, an optimized SMC order block detection algorithm (ensuring liquidity sweep and FVG presence), correctly fetching up to 2 years of daily data, and a custom Black Box charting indicator with overlaid canvas graphics.
 
 **Last working item**: 
-    - Last item agent was working: Fixing the bug where Nifty 50 candles were not showing when the timeframe was changed. The agent mapped missing timeframe intervals (2m, 3m, 5m, 15m, etc.) in the backend () and added a fallback mechanism in the frontend (, ) to use  when the default  API returns empty bars for indices.
-    - Status: USER VERIFICATION PENDING
-    - Agent Testing Done: Y
-    - Which testing method agent to use? NA (Backend testing agent successfully passed 16/16 tests for timeframe fix)
+    - Last item agent was working: Fixing the Black Box indicator text overlap issue (Target/SL/Entry labels overlapping) and ensuring the transparent Black Box zones extend fully to the right edge of the chart as requested by the user. The agent applied fixes to the  canvas drawing code and took screenshots to show the user.
+    - Status: TESTING PENDING
+    - Agent Testing Done: Y (Screenshots were taken, but the agent failed to use the testing subagent).
+    - Which testing method agent to use? Frontend testing agent (The system reminder explicitly stated to use  for the reported bug, but the agent only took screenshots).
     - User Testing Done: N
 
 **All Pending/In progress Issue list**: 
-  None. (Waiting for user to verify the Nifty 50 timeframe fix).
+  - Issue 1: Verify the Black Box indicator text overlap and zone extension fixes. (P0)
+     - Attempted fixes: The agent updated  in  to stagger text labels inside a background pill and force the zones to draw across the chart width.
+     - Next debug checklist: Check  ( function). Call  to verify the frontend UI correctly displays staggered labels and non-overlapping text when the BB button is toggled.
+     - Why fix this issue and what will be achieved with the fix? Completes the user's specific request for a clean, non-cluttered custom indicator.
+     - Status: TESTING PENDING
+     - Is recurring issue? N
+     - Should Test frontend/backend/both after fix? Frontend
+     - Blocked on other issue: None
 
 **In progress Task List**: 
-  None. 
+  None
 
 **Upcoming and Future Tasks**:
-  None specified in the history. 
+  - Task 1: PCR Alert popup (NIFTY/SENSEX threshold cross) (Priority: P1)
+  - Task 2: Refactor and modularize  (Currently > 13,000 lines) (Priority: P2)
 
 **Completed work in this session**:
-- Cloned GitHub repo to  (DONE)
-- Reinstalled missing frontend node_modules (yarn install v1.22.22
-info No lockfile found.
-[1/4] Resolving packages...
-[2/4] Fetching packages...
-[3/4] Linking dependencies...
-[4/4] Building fresh packages...
-success Saved lockfile.
-Done in 0.07s.) and successfully booted up services (DONE)
-- Chart Legend UI cleanup in  (DONE)
-- Volume Profile & Footprint fix for Nifty 50/Options/Crypto via synthetic notional volume () in  (DONE)
-- Nifty 50 timeframe change bug fixed by updating  in  and adding a data-source fallback in  &  (DONE)
+- Created Market Intelligence Agent & UI  and  (DONE)
+- Added VIX 52-week percentile & Next Expiry countdowns to Market Intel (DONE)
+- Updated SMC Order Block logic to require FVG & liquidity sweeps for valid marking in  and  (DONE)
+- Fixed historical data restriction, changing the limit from 120 days to 730 days (2 years) for 1D/1W timeframes (DONE)
+- Added Day/Week/Month performance toggle for Brent and VIX inside the Intel panel (DONE)
+- Built the Black Box Indicator overlaid on chart canvas in  (DONE)
+- Implemented and then manually reverted a Support/Resistance multi-timeframe feature per user request (DONE)
 
 **Earlier issues found/mentioned but not fixed**:
-   None.
+   None
 
 **Known issue recurrence from previous fork**:
-  - Issue recurrence in previous fork: N/A (First fork)
+  - Issue recurrence in previous fork: N/A
   - Recurrence count: 0
   - Status: NA
 
@@ -46,63 +49,91 @@ Done in 0.07s.) and successfully booted up services (DONE)
 
 
 **Key Technical Concepts**:
-React, FastAPI, MongoDB, Webpack, WebSockets, yfinance, Trading Charting (Gann Angles, Volume Profiles, Footprints, Timeframe interval mapping).
+React Canvas API ( relies heavily on native Canvas rendering overlaying Lightweight Charts), FastAPI, MongoDB,  data aggregation, Algorithmic Trading Indicators (Smart Money Concepts, Swings, Fair Value Gaps).
 
 **key DB schema**:
   - standard MongoDB structure from the cloned template.
 
 **changes in tech stack**:
-  - None.
+  - None
 
 **All files of reference**: 
-1.  (Added missing timeframe mappings in  and synthetic volume logic for zero-volume bars).
-2.  (Removed legend badge for uptrend/downtrend UI).
-3.  &  (Added logic to fall back to  API if  returns empty data for indices).
-4.  (Created to persist the user's rule against screenshots and unauthorized testing).
+1.  (Updated heavily with  and  logic, plus text-overlap fixes).
+2.  (Created to replace old RSS news with dynamic market stats).
+3.  (Created to display the market intel data).
+4.  (Fixed historical data limits and updated SMC validation logic).
+5.  &  (Updated to pass  for daily/weekly charts).
 
 **Areas that need refactoring**: 
-  - None currently identified. 
+  -  is extremely bloated (>13,000 lines) and urgently needs to be broken down into routers and distinct service layers.
 
 **key api endpoints**:
-- 
-- 
+-  (New)
+-  (Updated with new limits)
 
 **Critical Info for New Agent**:
-- **USER RULE OVERRIDE**: The user has explicitly stated: *Screenshot nai lena kabhi bhi koi bhi task dunga tab also testing bhi nahi karna*. This is saved in . **NEVER** take screenshots or run testing agents on your own accord unless the user explicitly tells you to do so (e.g., they said test karo at the very end of this session, which is why testing was run).
-- Always use the  fallback logic for indices if integrating new components, as the Groww API often returns empty bars for . 
-- No specific external API keys (like Groww) have been added to  yet; they weren't in the base repo.  is integrated.
+- **Environment Space Management:** The container's disk () ran out of space during this session due to pip caches and . If you face , run  and  to free up gigabytes of data.
+- **Git Reset / Revert Restrictions:** The user asked to revert code (Last change jo kiye usko pehle jesa kar do). Do NOT use Unstaged changes after reset:
+M	.emergent/cron/webhook-crons
+M	CLONE_SUMMARY.md
+M	backend/tests/test_news_mirofish.py
+M	backend/tests/test_pac_so.py
+M	backend/tests/test_robo_discover_vertical_tabs.py
+M	backend/tests/test_stock_finder.py
+M	backend_test.py
+M	frontend/src/components/ChartPanel.jsx
+M	nifty_timeframe_test.py
+M	post_pull_verification_test.py
+M	robot3_comprehensive_test.py
+M	robot3_test.py or M	.emergent/cron/webhook-crons
+M	CLONE_SUMMARY.md
+M	backend/tests/test_news_mirofish.py
+M	backend/tests/test_pac_so.py
+M	backend/tests/test_robo_discover_vertical_tabs.py
+M	backend/tests/test_stock_finder.py
+M	backend_test.py
+M	frontend/src/components/ChartPanel.jsx
+M	nifty_timeframe_test.py
+M	post_pull_verification_test.py
+M	robot3_comprehensive_test.py
+M	robot3_test.py. The previous agent successfully reverted it manually via . You should advise the user to use the platform's free Rollback UI button if they want to undo a complex set of changes safely.
+- **Testing vs Screenshot User Rule Context:** The user originally strictly forbade taking screenshots or automated testing. However, in their very last message, they explicitly requested: *Testing karke screenshot show karo*. Therefore, for this specific Black Box bug, you are authorized and required to use testing. 
 
 **documents and test reports created in this job**:
-  - 
-  -  (updated)
+  -  (Passed successfully for the 2-year history feature).
 
-**Last 10 User Messages and any pending HUMAN messages**:
+**Last 10 User Messages and any pending HUMAN messages**: 
 1.  (DONE)
-2.  (DONE)
-3.  (DONE)
-4.  (DONE)
-5.  (DONE - reverted trend lines later based on user context)
-6.  (DONE - kept trend lines, removed legend text)
-7.  (DONE)
-8.  (DONE - Fixed fallback and tested using backend testing agent)
+2.  (DONE - added SR levels)
+3.  (Agent explained rollback)
+4.  (DONE - Agent manually reverted the SR levels via search & replace)
+5.  (DONE - Adjusted logic to extend zones to the right edge)
+6.  (In Progress / Testing Pending. Agent updated the code and took screenshots, but forgot to use the required ).
+7.  (MISSED - Needs execution).
 
-**Project Health Check**:
+**Project Health Check:**
 - Broken: None
-- Mocked: Synthetic volume generation added for Option/Index bars that return 0 volume from external APIs.
+- Mocked: None
 
 **3rd Party Integrations**:
-- yfinance (Data source fallback) — No key required.
-- Groww API (Primary data source) — Requires User API Key (currently missing from , but endpoints are running).
-- OpenAI / AI features — uses Emergent LLM Key.
+- yfinance (Market stats, SR levels, fallback bars) — No key required.
+- Groww API (Primary bar data source) — Requires User API Key (still absent in env, runs without it internally).
+- OpenAI / LLM features — uses Emergent LLM Key.
 
 **Testing status**:
-  - Testing agent used after significant changes: YES (Backend testing agent passed 16/16 tests for timeframe changes)
+  - Testing agent used after significant changes: YES (For historical candle fix) / NO (For the final BB text overlap bug)
   - Troubleshoot agent used after agent stuck in loop: NO
   - Test files created: None
   - Known regressions: None
 
 **Credentials to test flow**:
-  - None required for current functionality.
+- None needed.
 
 **What agent forgot to execute**:
-  - Nothing. All user requests have been executed and verified.</analysis>
+The agent fixed the text overlapping bug on the canvas and successfully took multiple screenshots as requested by the user, but completely ignored the system reminder instructing them to use  to formally verify the bug fix.
+
+**Debugging checklist for current issue**
+    Issue: Verify Black Box target/SL labels don't overlap and transparent boxes extend fully.
+    Frontend files to check: 
+    -  (Review the staggered drawing logic inside  around line ~1100-1300).
+    Next Action: Call  with frontend focus to ensure the custom Canvas UI renders cleanly without overlaps.</analysis>

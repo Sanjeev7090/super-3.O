@@ -2239,6 +2239,19 @@ const ChartPanel = ({
     });
 
     // ── Draw each Black Box ────────────────────────────────────
+    // Collect all right-side labels first to avoid overlap
+    const rightLabels = [];  // {y, text, color, bg}
+    const LABEL_H = 13;
+
+    const claimY = (yRaw) => {
+      if (yRaw == null) return null;
+      let y = yRaw;
+      for (const lbl of rightLabels) {
+        if (Math.abs(y - lbl.y) < LABEL_H + 2) y = lbl.y + LABEL_H + 3;
+      }
+      return y;
+    };
+
     boxes.forEach(box => {
       const isBull = box.type === 'bull';
       const xStart = toX(box.startTs);
@@ -2248,133 +2261,93 @@ const ChartPanel = ({
 
       if (yHigh == null || yLow == null) return;
 
-      // Start from xStart (or 0 if pivot is before visible range)
       const left  = (xStart != null && xStart > 0) ? xStart : 0;
-      const right = W - 6;                              // extend to right edge
+      const right = W - 6;
       const boxW  = Math.max(4, right - left);
       const top   = Math.min(yHigh, yLow);
       const boxH  = Math.max(4, Math.abs(yHigh - yLow));
 
       ctx.save();
-
-      // ── Pure black transparent fill ──────────────────────────
       ctx.fillStyle   = 'rgba(0, 0, 0, 0.60)';
-      ctx.strokeStyle = isBull
-        ? 'rgba(34, 197, 94, 0.90)'
-        : 'rgba(248,113,113, 0.90)';
-      ctx.lineWidth = 1.8;
+      ctx.strokeStyle = isBull ? 'rgba(34,197,94,0.90)' : 'rgba(248,113,113,0.90)';
+      ctx.lineWidth   = 1.8;
       ctx.fillRect(left, top, boxW, boxH);
       ctx.strokeRect(left, top, boxW, boxH);
 
-      // ── Label inside box ──────────────────────────────────────
       ctx.fillStyle = 'rgba(255,255,255,0.90)';
       ctx.font = 'bold 8px monospace';
       ctx.fillText('BLACK BOX', left + 5, top + 13);
       ctx.fillStyle = isBull ? 'rgba(34,197,94,0.85)' : 'rgba(248,113,113,0.85)';
       ctx.font = '7px monospace';
       ctx.fillText(box.label, left + 5, top + 23);
-
-      // Confirmation badge
       if (box.confirm) {
         ctx.fillStyle = 'rgba(250,204,21,0.95)';
         ctx.font = 'bold 7px monospace';
         ctx.fillText(`✓ ${box.confirm}`, left + 5, top + 33);
       }
-
-      // ── Midpoint dashed line ──────────────────────────────────
       if (yMid != null) {
         ctx.setLineDash([3, 3]);
-        ctx.strokeStyle = 'rgba(255,255,255,0.25)';
+        ctx.strokeStyle = 'rgba(255,255,255,0.22)';
         ctx.lineWidth   = 0.8;
-        ctx.beginPath();
-        ctx.moveTo(left, yMid);
-        ctx.lineTo(right, yMid);
-        ctx.stroke();
+        ctx.beginPath(); ctx.moveTo(left, yMid); ctx.lineTo(right, yMid); ctx.stroke();
         ctx.setLineDash([]);
-        ctx.fillStyle = 'rgba(200,200,200,0.55)';
-        ctx.font = '6px monospace';
-        ctx.fillText('50%', right + 2, yMid + 2);
       }
       ctx.restore();
 
-      // ── BOS level line ────────────────────────────────────────
-      if (box.bosLevel) {
-        const yBOS = toY(box.bosLevel);
-        if (yBOS != null) {
-          ctx.save();
-          ctx.setLineDash([6, 4]);
-          ctx.strokeStyle = 'rgba(251,191,36,0.80)';
-          ctx.lineWidth   = 1.2;
-          ctx.beginPath();
-          ctx.moveTo(left, yBOS);
-          ctx.lineTo(right, yBOS);
-          ctx.stroke();
-          ctx.setLineDash([]);
-          ctx.fillStyle = 'rgba(251,191,36,0.95)';
-          ctx.font      = 'bold 8px monospace';
-          const bosLbl  = box.bos ? 'BOS ✓' : 'BOS';
-          const tw = ctx.measureText(bosLbl).width;
-          ctx.fillText(bosLbl, right - tw - 2, yBOS - 2);
-          ctx.restore();
-        }
-      }
+      // ── Helper: draw dashed line + right label pill ──────────
+      const drawLevel = (price, lineColor, lblText, lblBg, lblTxt) => {
+        const yRaw = toY(price);
+        if (yRaw == null || yRaw < 0 || yRaw > H) return;
+        // Line
+        ctx.save();
+        ctx.setLineDash([5, 4]);
+        ctx.strokeStyle = lineColor;
+        ctx.lineWidth = 1;
+        ctx.beginPath(); ctx.moveTo(left, yRaw); ctx.lineTo(right - 78, yRaw); ctx.stroke();
+        ctx.setLineDash([]);
+        ctx.restore();
+        // Label queued for collision-safe draw later
+        const y = claimY(yRaw);
+        if (y != null) rightLabels.push({ y, text: lblText, bg: lblBg, txt: lblTxt, yLine: yRaw });
+      };
 
-      // ── Target line (green dashed) ────────────────────────────
-      if (box.target) {
-        const yT = toY(box.target);
-        if (yT != null) {
-          ctx.save();
-          ctx.setLineDash([4, 4]);
-          ctx.strokeStyle = 'rgba(34,197,94,0.65)';
-          ctx.lineWidth   = 1;
-          ctx.beginPath();
-          ctx.moveTo(left, yT);
-          ctx.lineTo(right, yT);
-          ctx.stroke();
-          ctx.setLineDash([]);
-          ctx.fillStyle = 'rgba(34,197,94,0.95)';
-          ctx.font      = 'bold 8px monospace';
-          const tLbl = isBull ? `▲ Target ${box.target.toFixed(0)}` : `▼ Target ${box.target.toFixed(0)}`;
-          const tw = ctx.measureText(tLbl).width;
-          ctx.fillText(tLbl, right - tw - 2, yT - 2);
-          ctx.restore();
-        }
-      }
+      if (box.bosLevel) drawLevel(box.bosLevel, 'rgba(251,191,36,0.75)',
+        box.bos ? `BOS ✓` : `BOS`, 'rgba(251,191,36,0.85)', '#000');
+      if (box.target)   drawLevel(box.target,   'rgba(34,197,94,0.65)',
+        `${isBull ? '▲' : '▼'} Target ${box.target.toFixed(0)}`, 'rgba(34,197,94,0.85)', '#fff');
+      if (box.sl)       drawLevel(box.sl,        'rgba(239,68,68,0.65)',
+        `✕ SL ${box.sl.toFixed(0)}`, 'rgba(239,68,68,0.85)', '#fff');
 
-      // ── SL line (red dashed) ──────────────────────────────────
-      if (box.sl) {
-        const ySL = toY(box.sl);
-        if (ySL != null) {
-          ctx.save();
-          ctx.setLineDash([4, 4]);
-          ctx.strokeStyle = 'rgba(239,68,68,0.65)';
-          ctx.lineWidth   = 1;
-          ctx.beginPath();
-          ctx.moveTo(left, ySL);
-          ctx.lineTo(right, ySL);
-          ctx.stroke();
-          ctx.setLineDash([]);
-          ctx.fillStyle = 'rgba(239,68,68,0.95)';
-          ctx.font      = 'bold 8px monospace';
-          const slLbl = `✕ SL ${box.sl.toFixed(0)}`;
-          const tw = ctx.measureText(slLbl).width;
-          ctx.fillText(slLbl, right - tw - 2, ySL + 10);
-          ctx.restore();
-        }
-      }
-
-      // ── Entry arrow ───────────────────────────────────────────
       if (box.inBox) {
         const eY = isBull ? toY(box.boxLow) : toY(box.boxHigh);
         if (eY != null) {
           ctx.save();
           ctx.fillStyle = isBull ? 'rgba(34,197,94,0.95)' : 'rgba(248,113,113,0.95)';
-          ctx.font      = 'bold 9px monospace';
+          ctx.font = 'bold 9px monospace';
           ctx.fillText(isBull ? '▲ ENTRY' : '▼ ENTRY', right + 2, eY + 3);
           ctx.restore();
         }
       }
     });
+
+    // ── Render all right-side labels (collision-safe) ──────────
+    ctx.save();
+    ctx.font = 'bold 7.5px monospace';
+    rightLabels.forEach(({ y, text, bg, txt }) => {
+      const tw  = ctx.measureText(text).width;
+      const rx  = W - tw - 12;
+      const ry  = y - 9;
+      // Pill background
+      ctx.fillStyle = bg;
+      ctx.beginPath();
+      if (ctx.roundRect) ctx.roundRect(rx - 2, ry, tw + 8, LABEL_H, 2);
+      else ctx.rect(rx - 2, ry, tw + 8, LABEL_H);
+      ctx.fill();
+      // Text
+      ctx.fillStyle = txt;
+      ctx.fillText(text, rx + 1, ry + 9.5);
+    });
+    ctx.restore();
 
     // ── Trend label top-left ───────────────────────────────────
     ctx.save();

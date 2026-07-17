@@ -29,7 +29,9 @@ from typing import Dict, Any, Optional
 logger = logging.getLogger(__name__)
 
 _cache: Dict[str, Any] = {}
-CACHE_TTL = 900  # 15 minutes
+CACHE_TTL       = 900   # 15 min — fresh threshold
+CACHE_STALE_TTL = 1800  # 30 min — serve stale while refreshing
+_refreshing     = False  # prevent concurrent background refreshes
 
 
 # ── Bias Levels ────────────────────────────────────────────────────────────────
@@ -400,151 +402,149 @@ def _next_expiry_info() -> Dict:
 
 # ── Main Fetch ─────────────────────────────────────────────────────────────────
 
-def _fetch_yf_prices() -> Dict[str, float]:
-    """Synchronous yfinance multi-ticker fetch."""
+def _fetch_single_ticker(sym: str, key: str) -> Dict[str, float]:
+    """Fetch one yfinance ticker — used in parallel pool."""
     import yfinance as yf
+    out: Dict[str, float] = {}
+    try:
+        info  = yf.Ticker(sym).fast_info
+        price = getattr(info, "last_price", None)
+        prev  = getattr(info, "previous_close", None)
+        if price:
+            out[key] = float(price)
+            if prev and prev > 0:
+                out[f"{key}_prev"]    = float(prev)
+                out[f"{key}_chg_pct"] = round((float(price) - float(prev)) / float(prev) * 100, 2)
+    except Exception as e:
+        logger.debug(f"yfinance fetch failed for {sym}: {e}")
+    return out
 
-    results: Dict[str, float] = {}
+
+def _fetch_yf_prices() -> Dict[str, float]:
+    """Parallel yfinance multi-ticker fetch (3 threads simultaneously)."""
+    from concurrent.futures import ThreadPoolExecutor, as_completed
+
     tickers_map = {
-        "BZ=F": "brent",
-        "^INDIAVIX": "vix",
-        "^NSEI": "nifty",
+        "BZ=F":       "brent",
+        "^INDIAVIX":  "vix",
+        "^NSEI":      "nifty",
     }
-    for sym, key in tickers_map.items():
-        try:
-            info = yf.Ticker(sym).fast_info
-            price = getattr(info, "last_price", None)
-            prev  = getattr(info, "previous_close", None)
-            if price:
-                results[key] = float(price)
-                if prev and prev > 0:
-                    results[f"{key}_prev"] = float(prev)
-                    results[f"{key}_chg_pct"] = round((price - prev) / prev * 100, 2)
-        except Exception as e:
-            logger.debug(f"yfinance fetch failed for {sym}: {e}")
-
+    results: Dict[str, float] = {}
+    with ThreadPoolExecutor(max_workers=3) as ex:
+        futures = {ex.submit(_fetch_single_ticker, sym, key): key
+                   for sym, key in tickers_map.items()}
+        for fut in as_completed(futures):
+            try:
+                results.update(fut.result())
+            except Exception:
+                pass
     return results
 
 
-async def fetch_market_intel() -> Dict:
-    """Public API — returns full market intelligence dict."""
-    now = datetime.now(timezone.utc)
+async def _do_refresh() -> None:
+    """Background refresh — updates cache without blocking the caller."""
+    global _refreshing
+    _refreshing = True
+    try:
+        await _build_intel()
+    except Exception as e:
+        logger.warning(f"Background market-intel refresh failed: {e}")
+    finally:
+        _refreshing = False
 
-    cached = _cache.get("intel")
-    if cached and (now - cached["ts"]).total_seconds() < CACHE_TTL:
-        return cached["data"]
 
+async def _build_intel() -> Dict:
+    """Core fetch-and-compute logic that writes to cache and returns data."""
+    now  = datetime.now(timezone.utc)
     loop = asyncio.get_event_loop()
 
-    # Parallel fetch: yfinance (sync in executor) + regulatory (async)
+    # Phase 1: parallel prices + regulatory
     yf_task  = loop.run_in_executor(None, _fetch_yf_prices)
     reg_task = asyncio.ensure_future(_fetch_regulatory_sentiment())
+    yf_data, regulatory = await asyncio.gather(yf_task, reg_task)
 
-
-    yf_data    = await yf_task
-    regulatory = await reg_task
-
-    # Extract values with safe defaults
     brent = yf_data.get("brent", 85.0)
     vix   = yf_data.get("vix",   15.0)
     nifty = yf_data.get("nifty", 24000.0)
-
     brent_chg = yf_data.get("brent_chg_pct", 0.0)
-    vix_chg   = yf_data.get("vix_chg_pct", 0.0)
+    vix_chg   = yf_data.get("vix_chg_pct",   0.0)
     nifty_chg = yf_data.get("nifty_chg_pct", 0.0)
 
-    # GIFT Nifty + VIX history + Brent history + expiry (parallel)
-    gift_task      = loop.run_in_executor(None, _fetch_gift_nifty, nifty)
-    vix_hist_task  = loop.run_in_executor(None, _fetch_vix_history)
+    # Phase 2: parallel GIFT + history fetches
+    gift_task       = loop.run_in_executor(None, _fetch_gift_nifty, nifty)
+    vix_hist_task   = loop.run_in_executor(None, _fetch_vix_history)
     brent_hist_task = loop.run_in_executor(None, _fetch_brent_history)
+    gift_nifty, vix_hist, brent_hist = await asyncio.gather(
+        gift_task, vix_hist_task, brent_hist_task)
 
-    gift_nifty, vix_hist, brent_hist = await asyncio.gather(gift_task, vix_hist_task, brent_hist_task)
-
-    # Expiry countdown (pure datetime math, no I/O)
-    expiry_info = _next_expiry_info()
-
+    expiry_info  = _next_expiry_info()
     gift_premium = round(gift_nifty - nifty, 1)
 
-    # VIX percentile
-    vix_52w_high = vix_hist.get("vix_52w_high", 0.0)
-    vix_52w_low  = vix_hist.get("vix_52w_low",  0.0)
+    vix_52w_high   = vix_hist.get("vix_52w_high", 0.0)
+    vix_52w_low    = vix_hist.get("vix_52w_low",  0.0)
     vix_percentile = _calc_vix_percentile(vix, vix_52w_low, vix_52w_high)
 
-    # VIX zone label
-    if vix_percentile >= 75:
-        vix_zone = "Extreme Fear"
-        vix_zone_color = "#ef4444"
-    elif vix_percentile >= 50:
-        vix_zone = "Elevated"
-        vix_zone_color = "#f97316"
-    elif vix_percentile >= 25:
-        vix_zone = "Moderate"
-        vix_zone_color = "#eab308"
-    else:
-        vix_zone = "Low / Calm"
-        vix_zone_color = "#22c55e"
+    if   vix_percentile >= 75: vix_zone, vix_zone_color = "Extreme Fear", "#ef4444"
+    elif vix_percentile >= 50: vix_zone, vix_zone_color = "Elevated",     "#f97316"
+    elif vix_percentile >= 25: vix_zone, vix_zone_color = "Moderate",     "#eab308"
+    else:                      vix_zone, vix_zone_color = "Low / Calm",   "#22c55e"
 
-    # Scoring
     brent_score = _score_brent(brent)
     vix_score   = _score_vix(vix)
     reg_score   = _score_regulatory(regulatory)
     gift_score  = _score_gift(gift_premium)
     total_score = round(brent_score + vix_score + reg_score + gift_score, 2)
-
-    bias = _determine_bias(total_score)
+    bias        = _determine_bias(total_score)
 
     data = {
-        # Live values
-        "brent":             round(brent, 2),
-        "brent_chg_pct":     brent_chg,
-        "brent_chg_week":    brent_hist.get("brent_chg_week"),
-        "brent_chg_month":   brent_hist.get("brent_chg_month"),
-        "vix":               round(vix, 2),
-        "vix_chg_pct":       vix_chg,
-        "vix_chg_week":      vix_hist.get("vix_chg_week"),
-        "vix_chg_month":     vix_hist.get("vix_chg_month"),
-        "nifty":             round(nifty, 2),
-        "nifty_chg_pct":     nifty_chg,
-        "gift_nifty":        round(gift_nifty, 2),
-        "gift_premium":      gift_premium,
-        "regulatory":        regulatory,
-
-        # VIX 52-week
-        "vix_52w_high":      vix_52w_high,
-        "vix_52w_low":       vix_52w_low,
-        "vix_percentile":    vix_percentile,
-        "vix_zone":          vix_zone,
-        "vix_zone_color":    vix_zone_color,
-
-        # Expiry countdown
-        "expiry": expiry_info,
-
-        # Decision output
-        "bias":              bias["label"],
-        "bias_color":        bias["color"],
-        "move_label":        bias["move_label"],
-        "move_min":          bias["move_min"],
-        "move_max":          bias["move_max"],
-        "probability":       bias["probability"],
-        "action":            bias["action"],
-        "gift_color_label":  bias["gift_color"],
-
-        # Factor scores
+        "brent": round(brent, 2), "brent_chg_pct": brent_chg,
+        "brent_chg_week": brent_hist.get("brent_chg_week"),
+        "brent_chg_month": brent_hist.get("brent_chg_month"),
+        "vix": round(vix, 2), "vix_chg_pct": vix_chg,
+        "vix_chg_week": vix_hist.get("vix_chg_week"),
+        "vix_chg_month": vix_hist.get("vix_chg_month"),
+        "nifty": round(nifty, 2), "nifty_chg_pct": nifty_chg,
+        "gift_nifty": round(gift_nifty, 2), "gift_premium": gift_premium,
+        "regulatory": regulatory,
+        "vix_52w_high": vix_52w_high, "vix_52w_low": vix_52w_low,
+        "vix_percentile": vix_percentile, "vix_zone": vix_zone,
+        "vix_zone_color": vix_zone_color, "expiry": expiry_info,
+        "bias": bias["label"], "bias_color": bias["color"],
+        "move_label": bias["move_label"], "move_min": bias["move_min"],
+        "move_max": bias["move_max"], "probability": bias["probability"],
+        "action": bias["action"], "gift_color_label": bias["gift_color"],
         "scores": {
-            "brent":      brent_score,
-            "vix":        vix_score,
-            "regulatory": reg_score,
-            "gift":       gift_score,
-            "total":      total_score,
+            "brent": brent_score, "vix": vix_score,
+            "regulatory": reg_score, "gift": gift_score, "total": total_score,
         },
-
-        # Full matrix for frontend display
         "matrix": BIAS_LEVELS,
-
         "updated_at": now.isoformat(),
     }
-
     _cache["intel"] = {"data": data, "ts": now}
     return data
+
+
+async def fetch_market_intel() -> Dict:
+    """
+    Public API — stale-while-revalidate cache strategy.
+    • Fresh (< 15 min): return instantly from cache.
+    • Stale (15-30 min): return old cache immediately + trigger background refresh.
+    • Expired (> 30 min) or cold start: block and fetch fresh data.
+    """
+    global _refreshing
+    now    = datetime.now(timezone.utc)
+    cached = _cache.get("intel")
+
+    if cached:
+        age = (now - cached["ts"]).total_seconds()
+        if age < CACHE_TTL:
+            return cached["data"]          # Fresh — instant
+        if age < CACHE_STALE_TTL:
+            if not _refreshing:            # Trigger background refresh once
+                asyncio.ensure_future(_do_refresh())
+            return cached["data"]          # Return stale immediately
+
+    # Cold start or very stale — block and fetch
+    return await _build_intel()
 
  
