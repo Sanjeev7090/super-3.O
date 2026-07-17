@@ -11735,67 +11735,6 @@ async def websocket_crypto_stream(websocket: WebSocket):
 
 
 
-
-# ======================= BLACK BOX S/R LEVELS =======================
-
-@api_router.get("/stock/sr-levels/{ticker}")
-async def get_sr_levels(ticker: str):
-    """
-    Multi-timeframe Support & Resistance levels for Black Box indicator.
-    Returns Highs & Lows for: 30M, 1H, 4H, 1W, 30D, 6M, 1Y, 4Y
-    """
-    import yfinance as yf
-    loop = asyncio.get_event_loop()
-
-    def _fetch():
-        levels = []
-        try:
-            t = yf.Ticker(ticker)
-
-            # ── Daily → 30D / 6M / 1Y / 4Y ─────────────────────────
-            daily = t.history(period="4y", interval="1d")
-            if not daily.empty:
-                for label, n in [("30D", 30), ("6M", 180), ("1Y", 365), ("4Y", 1460)]:
-                    subset = daily.tail(n)
-                    if not subset.empty:
-                        levels.append({"label": f"{label} High", "price": round(float(subset["High"].max()), 2), "type": "high", "period": label})
-                        levels.append({"label": f"{label} Low",  "price": round(float(subset["Low"].min()),  2), "type": "low",  "period": label})
-
-            # ── Weekly bar → 1W ──────────────────────────────────────
-            weekly = t.history(period="1mo", interval="1wk")
-            if not weekly.empty:
-                w = weekly.iloc[-1]
-                levels.append({"label": "1W High", "price": round(float(w["High"]), 2), "type": "high", "period": "1W"})
-                levels.append({"label": "1W Low",  "price": round(float(w["Low"]),  2), "type": "low",  "period": "1W"})
-
-            # ── Hourly → 1H / 4H ────────────────────────────────────
-            hourly = t.history(period="5d", interval="1h")
-            if not hourly.empty:
-                h1 = hourly.iloc[-1]
-                h4 = hourly.tail(4)
-                levels.append({"label": "1H High", "price": round(float(h1["High"]), 2), "type": "high", "period": "1H"})
-                levels.append({"label": "1H Low",  "price": round(float(h1["Low"]),  2), "type": "low",  "period": "1H"})
-                levels.append({"label": "4H High", "price": round(float(h4["High"].max()), 2), "type": "high", "period": "4H"})
-                levels.append({"label": "4H Low",  "price": round(float(h4["Low"].min()),  2), "type": "low",  "period": "4H"})
-
-            # ── 30-min → 30M ─────────────────────────────────────────
-            m30 = t.history(period="1d", interval="30m")
-            if not m30.empty:
-                m = m30.iloc[-1]
-                levels.append({"label": "30M High", "price": round(float(m["High"]), 2), "type": "high", "period": "30M"})
-                levels.append({"label": "30M Low",  "price": round(float(m["Low"]),  2), "type": "low",  "period": "30M"})
-
-        except Exception as e:
-            logging.warning(f"SR levels fetch error for {ticker}: {e}")
-
-        # Sort by price descending
-        levels.sort(key=lambda x: x["price"], reverse=True)
-        return levels
-
-    levels = await loop.run_in_executor(None, _fetch)
-    return {"ticker": ticker, "levels": levels}
-
-
 # ======================= MARKET INTELLIGENCE =======================
 
 @api_router.get("/market-intel")

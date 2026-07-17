@@ -969,7 +969,6 @@ const ChartPanel = ({
   const bbCanvasRef = useRef(null);
   const bbAnimRef   = useRef(null);
   const bbDataRef   = useRef(null);
-  const bbSRRef     = useRef(null);   // multi-TF S/R levels
   // MTF Market Direction — 1H / 45M / 15M
   const [mtfDirection, setMtfDirection] = useState({ '1H': null, '45M': null, '15M': null });
   const { theme } = useTheme();
@@ -2198,16 +2197,6 @@ const ChartPanel = ({
     bbDataRef.current = computeBlackBox(stockData.bars);
   }, [stockData, bbActive]);
 
-  // ── Black Box: fetch multi-TF S/R levels ────────────────────────
-  useEffect(() => {
-    if (!bbActive || !selectedStock?.ticker) { bbSRRef.current = null; return; }
-    const API = process.env.REACT_APP_BACKEND_URL;
-    fetch(`${API}/api/stock/sr-levels/${selectedStock.ticker}`)
-      .then(r => r.json())
-      .then(d => { bbSRRef.current = d.levels || []; })
-      .catch(() => { bbSRRef.current = []; });
-  }, [bbActive, selectedStock?.ticker]);
-
   // ── Black Box: draw canvas ──────────────────────────────────────
   const drawBBCanvas = useCallback(() => {
     const canvas = bbCanvasRef.current;
@@ -2241,69 +2230,6 @@ const ChartPanel = ({
     const toY = p => { try { return series.priceToCoordinate(p); } catch { return null; } };
 
     const { trend, box, swingLabels } = bbData;
-
-    // ── Draw S/R level lines + right-side colored labels ───────
-    const srLevels = bbSRRef.current || [];
-    const PERIOD_COLORS = {
-      '4Y':  { bg: '#16a34a', txt: '#fff' },   // deep green
-      '1Y':  { bg: '#22c55e', txt: '#fff' },   // green
-      '6M':  { bg: '#4ade80', txt: '#000' },   // light green
-      '30D': { bg: '#f97316', txt: '#fff' },   // orange
-      '4H':  { bg: '#3b82f6', txt: '#fff' },   // blue
-      '1W':  { bg: '#8b5cf6', txt: '#fff' },   // purple
-      '1H':  { bg: '#06b6d4', txt: '#fff' },   // cyan
-      '30M': { bg: '#ec4899', txt: '#fff' },   // pink
-    };
-
-    if (srLevels.length > 0) {
-      // Track used Y positions to avoid label overlap
-      const usedY = [];
-      const LBL_H = 14, LBL_W = 80, LBL_PAD = 2;
-
-      srLevels.forEach(lv => {
-        const yLv = toY(lv.price);
-        if (yLv == null || yLv < 0 || yLv > H) return;
-        const clr = PERIOD_COLORS[lv.period] || { bg: '#64748b', txt: '#fff' };
-        const isHigh = lv.type === 'high';
-
-        // ── Horizontal dashed line ───────────────────────────
-        ctx.save();
-        ctx.setLineDash([3, 4]);
-        ctx.strokeStyle = isHigh ? 'rgba(34,197,94,0.35)' : 'rgba(248,113,113,0.35)';
-        ctx.lineWidth   = 0.7;
-        ctx.beginPath();
-        ctx.moveTo(0, yLv);
-        ctx.lineTo(W - LBL_W - 4, yLv);
-        ctx.stroke();
-        ctx.setLineDash([]);
-        ctx.restore();
-
-        // ── Right-side label box — avoid overlap ─────────────
-        let labelY = yLv - LBL_H / 2;
-        // Nudge down if overlapping a previous label
-        for (const uy of usedY) {
-          if (Math.abs(labelY - uy) < LBL_H + LBL_PAD) {
-            labelY = uy + LBL_H + LBL_PAD;
-          }
-        }
-        usedY.push(labelY);
-
-        ctx.save();
-        // Colored box background
-        const rx = W - LBL_W - 2;
-        const ry = labelY;
-        ctx.fillStyle = clr.bg;
-        ctx.beginPath();
-        ctx.roundRect ? ctx.roundRect(rx, ry, LBL_W, LBL_H, 2)
-                      : ctx.rect(rx, ry, LBL_W, LBL_H);
-        ctx.fill();
-        // Label text
-        ctx.fillStyle = clr.txt;
-        ctx.font      = 'bold 7.5px monospace';
-        ctx.fillText(`${lv.label}  ${lv.price}`, rx + 3, ry + 10);
-        ctx.restore();
-      });
-    }
 
     // ── Draw swing labels (HH / HL / LH / LL) ─────────────────
     (swingLabels || []).forEach(sw => {
