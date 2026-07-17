@@ -823,8 +823,12 @@ async def get_stock_bars(
                 stock = yf.Ticker(ticker)
                 hist = stock.history(period=period, interval=interval)
         else:
+            # Non-intraday (daily / weekly) — use generous defaults for max historical data
             if not from_date:
-                from_date = (datetime.now() - timedelta(days=120)).strftime("%Y-%m-%d")
+                if interval in ["1wk", "1mo", "3mo"]:
+                    from_date = (datetime.now() - timedelta(days=1825)).strftime("%Y-%m-%d")  # 5 years
+                else:  # 1d
+                    from_date = (datetime.now() - timedelta(days=730)).strftime("%Y-%m-%d")   # 2 years
             if not to_date:
                 to_date = datetime.now().strftime("%Y-%m-%d")
             

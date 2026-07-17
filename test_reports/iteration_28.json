@@ -1,0 +1,43 @@
+{
+  "summary": "Backend testing of historical candle data fix. Verified that 1D timeframe now returns 498 bars (728-day span, July 2024–July 2026), well above the minimum 365 required. Weekly (1W) returns 261 bars spanning 5.0 years. Intraday 15M (1425 bars) and 1H (5053 bars) still work correctly. Monthly-style views (1MO=22 bars, 3MO=64 bars, 6MO=123 bars) pass with explicit from_date. All 19/19 tests pass.",
+  "backend_issues": {
+    "critical": [],
+    "minor": []
+  },
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [],
+    "design_issues": []
+  },
+  "test_report_links": [
+    "/app/backend/tests/test_historical_candles.py",
+    "/app/test_reports/pytest/test_historical_candles.xml"
+  ],
+  "action_items": [],
+  "critical_code_review_comments": [
+    "All fixes verified correct. Backend default for daily = 730 days (returning 498 bars / ~2 years), weekly = 1825 days (returning 261 bars / 5 years). Intraday and monthly-style views unaffected."
+  ],
+  "updated_files": [
+    "/app/backend/tests/test_historical_candles.py"
+  ],
+  "success_rate": {
+    "backend": "100% (19/19 tests pass)",
+    "frontend": "N/A (not tested — backend-only request)"
+  },
+  "seed_data_creation": "None",
+  "retest_needed": false,
+  "should_main_agent_self_test": false,
+  "context_for_next_testing_agent": "Bug fix for insufficient historical candle data is verified working. Key bar counts: 1D=498 bars (span 2024-07-17 to 2026-07-15), 1W=261 bars (5-year span), 15M=1425 bars (60-day window), 1H=5053 bars (730-day window), 1MO=22, 3MO=64, 6MO=123 (with from_date). Test file: /app/backend/tests/test_historical_candles.py",
+  "test_results_detail": {
+    "daily_bar_count": "498 bars (≥365 threshold) — PASS",
+    "daily_date_span": "728 days (2024-07-17 to 2026-07-15) — PASS",
+    "weekly_bar_count": "261 bars (≥200 threshold) — PASS",
+    "weekly_date_span": "1820 days (~5.0 years) — PASS",
+    "15m_intraday": "1425 bars within 60-day window — PASS",
+    "1h_intraday": "5053 bars within 730-day window — PASS",
+    "1mo_30d": "22 bars (10–35 range) — PASS",
+    "3mo_90d": "64 bars (40–85 range) — PASS",
+    "6mo_180d": "123 bars (80–155 range) — PASS",
+    "api_health": "Backend reachable, invalid ticker returns error — PASS"
+  }
+}

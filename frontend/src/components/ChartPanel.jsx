@@ -832,10 +832,10 @@ const ChartPanel = ({
       { multiplier: 4, timespan: 'hour', label: '4H',  displayName: '4 hours' },
     ]},
     { group: 'DAYS', items: [
-      { multiplier: 1, timespan: 'day', label: '1D', displayName: '1 day' },
+      { multiplier: 1, timespan: 'day', label: '1D', displayName: '1 day', days: 730 },
     ]},
     { group: 'WEEKS', items: [
-      { multiplier: 1, timespan: 'week', label: '1W', displayName: '1 week' },
+      { multiplier: 1, timespan: 'week', label: '1W', displayName: '1 week', days: 1825 },
     ]},
     { group: 'MONTHS', items: [
       { multiplier: 1, timespan: 'day', label: '1MO', displayName: '1 month',  days: 30  },
@@ -843,7 +843,7 @@ const ChartPanel = ({
       { multiplier: 6, timespan: 'day', label: '6MO', displayName: '6 months', days: 180 },
     ]},
     { group: 'YEARS', items: [
-      { multiplier: 1, timespan: 'week', label: '1Y', displayName: '1 year', days: 365 },
+      { multiplier: 1, timespan: 'week', label: '1Y', displayName: '1 year', days: 1825 },
     ]},
   ];
 

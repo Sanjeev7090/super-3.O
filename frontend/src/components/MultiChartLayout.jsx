@@ -158,8 +158,8 @@ const GROWW_INTV_MAP = {
 const GROWW_DAYS_MAP = {
   '1MIN':7,'2M':7,'3M':7,'5M':10,'10M':15,'15M':15,'30M':25,'45M':25,
   '1H':60,'2H':90,'4H':150,
-  '1D':120,'1W':400,'1MO':730,
-  '1M':30,'6M':180,'1Y':365,
+  '1D':365,'1W':730,'1MO':30,'3MO':90,'6MO':180,
+  '1M':30,'6M':180,'1Y':730,
 };
 
 // Crypto TF label → days map (same as TradingDashboard.jsx)
