@@ -11760,6 +11760,21 @@ async def get_market_intel():
         }
 
 
+@api_router.get("/market-intel/fii")
+async def get_fii_intel():
+    """
+    FII/DII live data from NSE website.
+    Returns today's FII net buy/sell + classification + 5-day trend.
+    Cache: 1 hour (NSE updates once ~6 PM IST).
+    """
+    try:
+        from agents.market_intel import fetch_fii_intel
+        return await fetch_fii_intel()
+    except Exception as e:
+        logging.error(f"FII intel fetch error: {e}")
+        return {"source": "error", "message": str(e)}
+
+
 # ======================= MIROFISH SWARM INTELLIGENCE =======================
 
 @api_router.post("/mirofish/analyze")

@@ -453,6 +453,9 @@ const MarketIntelPanel = ({ onClose }) => {
               </div>
             </div>
 
+            {/* ── FII Activity Section (Collapsible) ─────────────────────── */}
+            <FiiSection C={C} isDark={isDark} />
+
             {/* Footer */}
             <p className="text-[9px] text-center" style={{ color: C.textMuted }}>
               Data: Brent Crude (ICE Futures via Yahoo Finance) · India VIX (NSE) · Regulatory (SEBI/NSE RSS) · GIFT Nifty (NSE IFSC / estimated) · For informational purposes only. Not investment advice.
@@ -464,5 +467,261 @@ const MarketIntelPanel = ({ onClose }) => {
     </div>
   );
 };
+
+// ── FII STATIC DATA ────────────────────────────────────────────────────────────
+const FII_LOGIC_ROWS = [
+  { action: 'Heavy Buying (₹2000 Cr+)',    nifty: 'Strong Bullish', move: '+150 to +400 pts', reason: 'Liquidity badhti hai, sentiment positive', color: '#22c55e' },
+  { action: 'Moderate Buying (₹500-2000 Cr)', nifty: 'Mild Bullish', move: '+50 to +150 pts',  reason: 'Normal up move',                           color: '#86efac' },
+  { action: 'Neutral',                     nifty: 'Sideways',        move: '-100 to +100 pts', reason: 'Market apne technicals pe chalega',         color: '#94a3b8' },
+  { action: 'Selling (₹1000 Cr+)',         nifty: 'Bearish',         move: '-150 to -400 pts', reason: 'Pressure badhta hai',                      color: '#ef4444' },
+];
+
+const MOMENTUM_RULES = [
+  'FII continuous 3-4 din buying kare → Strong upward momentum',
+  'Banking, IT, Auto mein heavy buying → Nifty mein bada move',
+  'Crude stable + FII buying → Sabse powerful combination',
+];
+
+const BUY_SIGNALS = [
+  'FII net buying + GIFT Nifty green',
+  'Previous day FII buying + Banking strong',
+  'Crude stable/gir raha ho',
+];
+
+const SELL_SIGNALS = [
+  'FII selling + Crude badh raha ho',
+  'FII selling + VIX badh raha ho',
+];
+
+const PRACTICAL_RULES = [
+  'Roz subah FII/DII data check karo (NSE website pe 6 PM ke baad aata hai)',
+  'Agar FII 3 din se buying kar rahe hain → Long bias strong',
+  'Agar FII selling kar rahe hain → Position chhoti rakho ya hedge',
+];
+
+// ── FII SECTION COMPONENT ──────────────────────────────────────────────────────
+function FiiSection({ C, isDark }) {
+  const [open,    setOpen]    = useState(false);
+  const [fiiData, setFiiData] = useState(null);
+  const [loading, setLoading] = useState(false);
+
+  const loadFii = useCallback(async () => {
+    if (fiiData || loading) return;
+    setLoading(true);
+    try {
+      const { data } = await axios.get(`${API}/market-intel/fii`);
+      setFiiData(data);
+    } catch {
+      setFiiData({ source: 'error' });
+    } finally {
+      setLoading(false);
+    }
+  }, [fiiData, loading]);
+
+  const handleToggle = () => {
+    const next = !open;
+    setOpen(next);
+    if (next) loadFii();
+  };
+
+  const live  = fiiData && fiiData.fii;
+  const cls   = fiiData?.classification;
+  const trend = fiiData?.trend || [];
+
+  const fmtCr = (v) => {
+    if (v == null) return '—';
+    const abs = Math.abs(v);
+    if (abs >= 10000) return `₹${(v / 100).toFixed(0)}Cr`;
+    return `₹${Number(v).toFixed(0)} Cr`;
+  };
+
+  return (
+    <div className="rounded-xl overflow-hidden" style={{ border: `1px solid ${C.border}` }}>
+      {/* Header toggle row */}
+      <button
+        className="w-full flex items-center justify-between px-4 py-2.5 transition-all"
+        style={{ background: C.cardBg }}
+        onClick={handleToggle}
+        data-testid="fii-section-toggle"
+      >
+        <div className="flex items-center gap-2">
+          <TrendUp size={13} className="text-emerald-500" />
+          <span className="text-[10px] font-bold uppercase tracking-widest" style={{ color: C.textPrimary }}>
+            FII / DII Activity
+          </span>
+          {live && (
+            <span
+              className="px-1.5 py-0.5 rounded text-[9px] font-bold ml-1"
+              style={{ background: `${cls?.color}20`, color: cls?.color }}
+            >
+              {fmtCr(live.net)} Net
+            </span>
+          )}
+          <span className="text-[9px] ml-1" style={{ color: C.textMuted }}>
+            NSE Live
+          </span>
+        </div>
+        <span className="text-[10px] transition-transform" style={{ color: C.textMuted, transform: open ? 'rotate(180deg)' : 'rotate(0deg)', display: 'inline-block' }}>▼</span>
+      </button>
+
+      {open && (
+        <div className="px-4 pb-4 pt-1 space-y-3" style={{ background: C.panelBg }}>
+
+          {/* Live FII/DII Data */}
+          {loading && (
+            <div className="flex items-center gap-2 py-2">
+              <ArrowClockwise size={12} className="animate-spin text-sky-500" />
+              <span className="text-[10px]" style={{ color: C.textSecond }}>NSE se data fetch ho raha hai...</span>
+            </div>
+          )}
+
+          {live && (
+            <div className="rounded-lg p-3 space-y-2" style={{ background: C.cardBg, border: `1px solid ${C.border}` }}>
+              <div className="flex items-center justify-between mb-1">
+                <span className="text-[9px] uppercase tracking-widest font-bold" style={{ color: C.textMuted }}>Today's FII/DII Data</span>
+                <span className="text-[9px]" style={{ color: C.textMuted }}>{fiiData.date}</span>
+              </div>
+              <div className="grid grid-cols-3 gap-2">
+                {[
+                  { label: 'FII Buy',  val: fmtCr(live.buy),  color: '#22c55e' },
+                  { label: 'FII Sell', val: fmtCr(live.sell), color: '#ef4444' },
+                  { label: 'FII Net',  val: fmtCr(live.net),  color: cls?.color || '#94a3b8' },
+                ].map(({ label, val, color }) => (
+                  <div key={label} className="text-center">
+                    <div className="text-[9px]" style={{ color: C.textMuted }}>{label}</div>
+                    <div className="text-xs font-bold font-mono" style={{ color }}>{val}</div>
+                  </div>
+                ))}
+              </div>
+              {fiiData.dii && (
+                <div className="grid grid-cols-3 gap-2 pt-1.5" style={{ borderTop: `1px solid ${C.borderSubtle}` }}>
+                  {[
+                    { label: 'DII Buy',  val: fmtCr(fiiData.dii.buy),  color: '#22c55e' },
+                    { label: 'DII Sell', val: fmtCr(fiiData.dii.sell), color: '#ef4444' },
+                    { label: 'DII Net',  val: fmtCr(fiiData.dii.net),  color: fiiData.dii.net >= 0 ? '#22c55e' : '#ef4444' },
+                  ].map(({ label, val, color }) => (
+                    <div key={label} className="text-center">
+                      <div className="text-[9px]" style={{ color: C.textMuted }}>{label}</div>
+                      <div className="text-xs font-bold font-mono" style={{ color }}>{val}</div>
+                    </div>
+                  ))}
+                </div>
+              )}
+              {cls && (
+                <div className="flex items-center gap-2 pt-1.5" style={{ borderTop: `1px solid ${C.borderSubtle}` }}>
+                  <span className="px-1.5 py-0.5 rounded text-[9px] font-bold" style={{ background: `${cls.color}20`, color: cls.color }}>{cls.action}</span>
+                  <span className="text-[9px]" style={{ color: C.textSecond }}>→ {cls.nifty} · {cls.move}</span>
+                </div>
+              )}
+              {fiiData.momentum && fiiData.momentum !== 'Neutral' && (
+                <div className="text-[9px] font-semibold" style={{ color: fiiData.momentum.includes('Bull') ? '#22c55e' : '#ef4444' }}>
+                  Momentum: {fiiData.momentum}
+                </div>
+              )}
+              {trend.length > 0 && (
+                <div className="flex gap-1 pt-1 flex-wrap">
+                  {trend.map((t, i) => (
+                    <span key={i} className="px-1 py-0.5 rounded text-[8px] font-mono" style={{ background: t.net >= 0 ? 'rgba(34,197,94,0.12)' : 'rgba(239,68,68,0.12)', color: t.net >= 0 ? '#22c55e' : '#ef4444' }}>
+                      {t.date ? t.date.slice(0, 6) : `D-${i+1}`}: {t.net >= 0 ? '+' : ''}{fmtCr(t.net)}
+                    </span>
+                  ))}
+                </div>
+              )}
+            </div>
+          )}
+
+          {fiiData && !live && fiiData.source !== 'error' && (
+            <div className="text-[9px] py-1.5 px-2 rounded" style={{ background: isDark ? 'rgba(251,191,36,0.08)' : 'rgba(251,191,36,0.12)', color: '#fbbf24' }}>
+              {fiiData.message || 'NSE FII data available after 6 PM IST'}
+            </div>
+          )}
+
+          {/* FII Logic Table */}
+          <div>
+            <div className="text-[9px] uppercase tracking-widest mb-1.5 font-semibold" style={{ color: C.textMuted }}>FII Buying ka Basic Logic</div>
+            <div className="rounded-lg overflow-hidden" style={{ border: `1px solid ${C.border}` }}>
+              <table className="w-full text-[9px]">
+                <thead>
+                  <tr style={{ background: C.tableBg }}>
+                    {['FII Action', 'Nifty pe Asar', 'Kitna Move', 'Kyun?'].map(h => (
+                      <th key={h} className="px-2 py-1.5 text-left font-semibold uppercase tracking-widest whitespace-nowrap" style={{ color: C.textMuted }}>{h}</th>
+                    ))}
+                  </tr>
+                </thead>
+                <tbody>
+                  {FII_LOGIC_ROWS.map((row, i) => (
+                    <tr key={i} style={{ borderTop: `1px solid ${C.borderSubtle}` }}>
+                      <td className="px-2 py-1.5 font-semibold whitespace-nowrap" style={{ color: row.color }}>{row.action}</td>
+                      <td className="px-2 py-1.5" style={{ color: C.textPrimary }}>{row.nifty}</td>
+                      <td className="px-2 py-1.5 font-mono" style={{ color: C.textCell }}>{row.move}</td>
+                      <td className="px-2 py-1.5" style={{ color: C.textSecond }}>{row.reason}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          </div>
+
+          {/* Momentum + Signals in 2 col */}
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+
+            {/* Momentum Rules */}
+            <div className="rounded-lg p-2.5 space-y-1" style={{ background: C.cardBg, border: `1px solid ${C.border}` }}>
+              <div className="text-[9px] uppercase tracking-widest font-semibold mb-1" style={{ color: C.textMuted }}>Momentum Kab Aata Hai?</div>
+              {MOMENTUM_RULES.map((r, i) => (
+                <div key={i} className="flex gap-1.5 text-[9px]">
+                  <span style={{ color: '#22c55e' }}>•</span>
+                  <span style={{ color: C.textSecond }}>{r}</span>
+                </div>
+              ))}
+            </div>
+
+            {/* Daily Signals */}
+            <div className="rounded-lg p-2.5 space-y-2" style={{ background: C.cardBg, border: `1px solid ${C.border}` }}>
+              <div>
+                <div className="text-[9px] font-bold mb-1" style={{ color: '#22c55e' }}>Buy Signal:</div>
+                {BUY_SIGNALS.map((s, i) => (
+                  <div key={i} className="flex gap-1.5 text-[9px]">
+                    <span style={{ color: '#22c55e' }}>▲</span>
+                    <span style={{ color: C.textSecond }}>{s}</span>
+                  </div>
+                ))}
+              </div>
+              <div>
+                <div className="text-[9px] font-bold mb-1" style={{ color: '#ef4444' }}>Sell / Cautious:</div>
+                {SELL_SIGNALS.map((s, i) => (
+                  <div key={i} className="flex gap-1.5 text-[9px]">
+                    <span style={{ color: '#ef4444' }}>▼</span>
+                    <span style={{ color: C.textSecond }}>{s}</span>
+                  </div>
+                ))}
+              </div>
+            </div>
+          </div>
+
+          {/* Practical Rules */}
+          <div className="rounded-lg p-2.5" style={{ background: isDark ? 'rgba(99,102,241,0.08)' : 'rgba(99,102,241,0.06)', border: `1px solid rgba(99,102,241,0.20)` }}>
+            <div className="text-[9px] uppercase tracking-widest font-semibold mb-1.5" style={{ color: '#818cf8' }}>Practical Rules</div>
+            {PRACTICAL_RULES.map((r, i) => (
+              <div key={i} className="flex gap-1.5 text-[9px] mb-1">
+                <span style={{ color: '#818cf8' }}>→</span>
+                <span style={{ color: C.textSecond }}>{r}</span>
+              </div>
+            ))}
+          </div>
+
+          {/* Context */}
+          <div className="text-[9px] px-2 py-1.5 rounded" style={{ background: C.cardBg, color: C.textSecond, border: `1px solid ${C.border}` }}>
+            <span className="font-semibold" style={{ color: C.textPrimary }}>Current Context (Jul 2026):</span>
+            {' '}FII buying agar continue kiya to Nifty ko support milega · Warna oil pressure dominate karega
+          </div>
+
+        </div>
+      )}
+    </div>
+  );
+}
+
+
 
 export default MarketIntelPanel;

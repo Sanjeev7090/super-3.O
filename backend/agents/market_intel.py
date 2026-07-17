@@ -356,6 +356,133 @@ def _fetch_brent_history() -> Dict:
 
 
 
+# ── FII / DII Data from NSE ────────────────────────────────────────────────────
+
+_FII_CACHE: Dict[str, Any] = {}
+_FII_CACHE_TTL = 3600  # 1 hour (NSE updates FII data once at ~6 PM IST)
+
+def _parse_fii_row(row: dict) -> Optional[Dict]:
+    """Parse one FII/DII row from NSE API response."""
+    try:
+        def _f(v):
+            if v is None: return 0.0
+            return float(str(v).replace(",", ""))
+        buy  = _f(row.get("buyValue")  or row.get("grossPurchase") or row.get("grossBuy"))
+        sell = _f(row.get("sellValue") or row.get("grossSales")    or row.get("grossSell"))
+        net  = _f(row.get("netValue")  or row.get("netPurchase")   or row.get("net"))
+        if buy == 0 and sell == 0 and net != 0:
+            buy, sell = (net, 0) if net > 0 else (0, -net)
+        return {"buy": round(buy, 2), "sell": round(sell, 2), "net": round(net, 2)}
+    except Exception:
+        return None
+
+
+def _classify_fii(net_cr: float) -> Dict:
+    """Return action label, nifty impact, move range and reason."""
+    if   net_cr >= 2000:  return {"action": "Heavy Buying",    "nifty": "Strong Bullish",  "move": "+150 to +400 pts", "reason": "Liquidity badhti hai, sentiment positive", "color": "#22c55e"}
+    elif net_cr >= 500:   return {"action": "Moderate Buying", "nifty": "Mild Bullish",    "move": "+50 to +150 pts",  "reason": "Normal up move",                          "color": "#86efac"}
+    elif net_cr >= -500:  return {"action": "Neutral",         "nifty": "Sideways",        "move": "-100 to +100 pts", "reason": "Market apne technicals pe chalega",        "color": "#94a3b8"}
+    elif net_cr >= -1000: return {"action": "Mild Selling",    "nifty": "Mild Bearish",    "move": "-50 to -150 pts",  "reason": "Mild pressure",                           "color": "#fca5a5"}
+    else:                 return {"action": "Heavy Selling",   "nifty": "Bearish",         "move": "-150 to -400 pts", "reason": "Pressure badhta hai",                     "color": "#ef4444"}
+
+
+def _fetch_fii_data_sync() -> Dict:
+    """Fetch FII/DII data from NSE website using curl_cffi."""
+    try:
+        from curl_cffi import requests as cffi_req
+        s = cffi_req.Session(impersonate="chrome120")
+        headers = {
+            "Accept":           "application/json, text/plain, */*",
+            "Accept-Language":  "en-US,en;q=0.9",
+            "Referer":          "https://www.nseindia.com/market-data/fii-dii-activity",
+        }
+        # Warm NSE cookies
+        s.get("https://www.nseindia.com/", timeout=8, headers={"Accept": "text/html"})
+        s.get("https://www.nseindia.com/market-data/fii-dii-activity", timeout=8, headers={"Accept": "text/html"})
+
+        # Try primary FII endpoint
+        r = s.get("https://www.nseindia.com/api/fiidiioutflow", timeout=10, headers=headers)
+        if r.status_code == 200:
+            raw = r.json()
+            rows = raw if isinstance(raw, list) else raw.get("data", [])
+        else:
+            return {}
+
+        fii_row = next((x for x in rows if "FII" in str(x.get("category","")).upper()), None)
+        dii_row = next((x for x in rows if "DII" in str(x.get("category","")).upper()), None)
+        if not fii_row:
+            return {}
+
+        fii = _parse_fii_row(fii_row)
+        dii = _parse_fii_row(dii_row) if dii_row else None
+        if not fii:
+            return {}
+
+        date_str = fii_row.get("date") or fii_row.get("tradeDate") or ""
+        classification = _classify_fii(fii["net"])
+
+        # Try to get last 5 days data for trend
+        trend = []
+        try:
+            r2 = s.get(
+                "https://www.nseindia.com/api/fiidiioutflow?type=historical",
+                timeout=8, headers=headers
+            )
+            if r2.status_code == 200:
+                hist_raw = r2.json()
+                hist_rows = hist_raw if isinstance(hist_raw, list) else hist_raw.get("data", [])
+                fii_hist = [x for x in hist_rows if "FII" in str(x.get("category","")).upper()][:5]
+                for h in fii_hist:
+                    p = _parse_fii_row(h)
+                    if p:
+                        trend.append({"date": h.get("date",""), "net": p["net"]})
+        except Exception:
+            pass
+
+        # Momentum signal from trend
+        momentum = "Neutral"
+        if len(trend) >= 3:
+            recent_nets = [t["net"] for t in trend[:3]]
+            if all(n > 500 for n in recent_nets):
+                momentum = "Strong Bullish (3+ days buying)"
+            elif all(n > 0 for n in recent_nets):
+                momentum = "Mild Bullish (3 days positive)"
+            elif all(n < -500 for n in recent_nets):
+                momentum = "Strong Bearish (3+ days selling)"
+            elif all(n < 0 for n in recent_nets):
+                momentum = "Mild Bearish (3 days negative)"
+
+        return {
+            "date": date_str,
+            "fii": fii,
+            "dii": dii,
+            "classification": classification,
+            "momentum": momentum,
+            "trend": trend,
+            "source": "NSE Live",
+        }
+    except Exception as e:
+        logger.debug(f"FII NSE fetch failed: {e}")
+        return {}
+
+
+async def fetch_fii_intel() -> Dict:
+    """Public API — FII/DII data with 1-hour cache."""
+    now    = datetime.now(timezone.utc)
+    cached = _FII_CACHE.get("fii")
+    if cached and (now - cached["ts"]).total_seconds() < _FII_CACHE_TTL:
+        return cached["data"]
+
+    loop = asyncio.get_event_loop()
+    data = await loop.run_in_executor(None, _fetch_fii_data_sync)
+
+    if not data:
+        data = {"source": "unavailable", "message": "NSE FII data available after 6 PM IST"}
+
+    _FII_CACHE["fii"] = {"data": data, "ts": now}
+    return data
+
+
 # ── Main Fetch ─────────────────────────────────────────────────────────────────
 
 def _fetch_single_ticker(sym: str, key: str) -> Dict[str, float]:
