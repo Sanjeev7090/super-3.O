@@ -173,7 +173,7 @@ const MarketIntelPanel = ({ onClose }) => {
           <div className="p-5 space-y-5">
 
             {/* Live Data Strip */}
-            <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-3">
+            <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-7 gap-3">
 
               {/* Brent Crude */}
               <div className="rounded-xl p-3" style={{ background: C.cardBg, border: `1px solid ${C.border}` }}>
@@ -213,7 +213,7 @@ const MarketIntelPanel = ({ onClose }) => {
                 </div>
               </div>
 
-              {/* Other 4 cards */}
+              {/* Other cards — Nifty 50, Nasdaq, GIFT, Regulatory, Bias */}
               {[
                 {
                   label: 'Nifty 50',
@@ -221,6 +221,18 @@ const MarketIntelPanel = ({ onClose }) => {
                   sub: fmtPct(data.nifty_chg_pct),
                   subColor: chgColor(data.nifty_chg_pct),
                   icon: <TrendUp size={14} />,
+                },
+                {
+                  label: 'Nasdaq',
+                  value: data.nasdaq > 0 ? data.nasdaq.toLocaleString('en-US', { maximumFractionDigits: 0 }) : '—',
+                  sub: data.nasdaq_pts !== 0
+                    ? `${data.nasdaq_pts > 0 ? '+' : ''}${fmt(data.nasdaq_pts, 0)} pts (${fmtPct(data.nasdaq_chg_pct)})`
+                    : fmtPct(data.nasdaq_chg_pct),
+                  subColor: chgColor(data.nasdaq_chg_pct),
+                  icon: <TrendUp size={14} />,
+                  badge: data.nasdaq_pts !== 0 ? data.nasdaq_nifty_label : null,
+                  badgeColor: data.nasdaq_nifty_color,
+                  badgeTitle: 'Nifty Impact',
                 },
                 {
                   label: 'GIFT Nifty',
@@ -245,7 +257,7 @@ const MarketIntelPanel = ({ onClose }) => {
                   icon: <Gauge size={14} />,
                   valueColor: data.bias_color,
                 },
-              ].map(({ label, value, sub, subColor, icon, valueColor }) => (
+              ].map(({ label, value, sub, subColor, icon, valueColor, badge, badgeColor, badgeTitle }) => (
                 <div key={label} className="rounded-xl p-3" style={{ background: C.cardBg, border: `1px solid ${C.border}` }}>
                   <div className="flex items-center gap-1.5 text-[9px] mb-1.5" style={{ color: C.textMuted }}>
                     {icon}
@@ -253,6 +265,12 @@ const MarketIntelPanel = ({ onClose }) => {
                   </div>
                   <div className="text-sm font-bold font-mono" style={{ color: valueColor || C.textPrimary }}>{value}</div>
                   <div className="text-[10px] mt-0.5 font-mono" style={{ color: subColor }}>{sub}</div>
+                  {badge && (
+                    <div className="mt-1.5 flex items-center gap-1">
+                      <span className="text-[8px] uppercase tracking-widest" style={{ color: C.textMuted }}>{badgeTitle}:</span>
+                      <span className="text-[9px] font-bold font-mono" style={{ color: badgeColor }}>{badge}</span>
+                    </div>
+                  )}
                 </div>
               ))}
             </div>
@@ -269,7 +287,7 @@ const MarketIntelPanel = ({ onClose }) => {
                   <div className="text-2xl font-black" style={{ color: data.bias_color }}>{data.bias}</div>
                   <div className="text-xs mt-1" style={{ color: C.textSecond }}>{data.action}</div>
                 </div>
-                <div className="flex gap-4">
+                <div className="flex gap-4 flex-wrap">
                   <div className="text-center">
                     <div className="text-[9px] uppercase tracking-widest" style={{ color: C.textMuted }}>Expected Move (1-3 Days)</div>
                     <div className="text-base font-bold font-mono mt-0.5" style={{ color: C.textPrimary }}>{data.move_label}</div>
@@ -278,9 +296,56 @@ const MarketIntelPanel = ({ onClose }) => {
                     <div className="text-[9px] uppercase tracking-widest" style={{ color: C.textMuted }}>Probability</div>
                     <div className="text-base font-bold mt-0.5 text-amber-500">{data.probability}</div>
                   </div>
+                  {data.nasdaq_pts !== 0 && (
+                    <div className="text-center">
+                      <div className="text-[9px] uppercase tracking-widest" style={{ color: C.textMuted }}>Nasdaq → Nifty Impact</div>
+                      <div className="text-base font-bold font-mono mt-0.5" style={{ color: data.nasdaq_nifty_color }}>
+                        {data.nasdaq_nifty_label}
+                      </div>
+                      <div className="text-[9px] mt-0.5" style={{ color: data.nasdaq_nifty_color }}>{data.nasdaq_nifty_signal}</div>
+                    </div>
+                  )}
                 </div>
               </div>
             </div>
+
+            {/* Nasdaq ↔ Nifty Correlation Info Strip */}
+            {data.nasdaq > 0 && (
+              <div className="rounded-xl px-4 py-3 flex flex-wrap items-center gap-x-5 gap-y-2"
+                style={{ background: C.cardBg, border: `1px solid ${C.border}` }}
+                data-testid="nasdaq-nifty-correlation">
+                <div className="flex items-center gap-2 shrink-0">
+                  <ChartLine size={13} className="text-blue-400" />
+                  <span className="text-[9px] uppercase tracking-widest font-bold" style={{ color: C.textMuted }}>Nasdaq ↔ Nifty Correlation</span>
+                </div>
+                <div className="flex gap-4 flex-wrap text-[9px]">
+                  <div className="flex items-center gap-1.5">
+                    <span className="font-bold" style={{ color: '#22c55e' }}>Nasdaq +100 pts</span>
+                    <span style={{ color: C.textMuted }}>→</span>
+                    <span style={{ color: C.textSecond }}>Nifty avg <span className="font-bold text-emerald-400">+80 to +150 pts</span></span>
+                  </div>
+                  <div className="h-3 w-px self-center" style={{ background: C.border }} />
+                  <div className="flex items-center gap-1.5">
+                    <span className="font-bold" style={{ color: '#ef4444' }}>Nasdaq -100 pts</span>
+                    <span style={{ color: C.textMuted }}>→</span>
+                    <span style={{ color: C.textSecond }}>Nifty avg <span className="font-bold text-red-400">-100 to -200 pts</span></span>
+                  </div>
+                  {data.nasdaq_pts !== 0 && (
+                    <>
+                      <div className="h-3 w-px self-center" style={{ background: C.border }} />
+                      <div className="flex items-center gap-1.5">
+                        <span className="font-semibold" style={{ color: C.textSecond }}>Today Nasdaq</span>
+                        <span className="font-bold font-mono" style={{ color: data.nasdaq_nifty_color }}>
+                          {data.nasdaq_pts > 0 ? '+' : ''}{data.nasdaq_pts.toLocaleString()} pts
+                        </span>
+                        <span style={{ color: C.textMuted }}>→</span>
+                        <span className="font-bold font-mono" style={{ color: data.nasdaq_nifty_color }}>{data.nasdaq_nifty_label}</span>
+                      </div>
+                    </>
+                  )}
+                </div>
+              </div>
+            )}
 
             {/* Factor Scores */}
             {data.scores && (

@@ -504,16 +504,17 @@ def _fetch_single_ticker(sym: str, key: str) -> Dict[str, float]:
 
 
 def _fetch_yf_prices() -> Dict[str, float]:
-    """Parallel yfinance multi-ticker fetch (3 threads simultaneously)."""
+    """Parallel yfinance multi-ticker fetch (4 threads simultaneously)."""
     from concurrent.futures import ThreadPoolExecutor, as_completed
 
     tickers_map = {
         "BZ=F":       "brent",
         "^INDIAVIX":  "vix",
         "^NSEI":      "nifty",
+        "^IXIC":      "nasdaq",
     }
     results: Dict[str, float] = {}
-    with ThreadPoolExecutor(max_workers=3) as ex:
+    with ThreadPoolExecutor(max_workers=4) as ex:
         futures = {ex.submit(_fetch_single_ticker, sym, key): key
                    for sym, key in tickers_map.items()}
         for fut in as_completed(futures):
@@ -549,9 +550,36 @@ async def _build_intel() -> Dict:
     brent = yf_data.get("brent", 85.0)
     vix   = yf_data.get("vix",   15.0)
     nifty = yf_data.get("nifty", 24000.0)
-    brent_chg = yf_data.get("brent_chg_pct", 0.0)
-    vix_chg   = yf_data.get("vix_chg_pct",   0.0)
-    nifty_chg = yf_data.get("nifty_chg_pct", 0.0)
+    nasdaq = yf_data.get("nasdaq", 0.0)
+    brent_chg  = yf_data.get("brent_chg_pct",  0.0)
+    vix_chg    = yf_data.get("vix_chg_pct",    0.0)
+    nifty_chg  = yf_data.get("nifty_chg_pct",  0.0)
+    nasdaq_chg = yf_data.get("nasdaq_chg_pct", 0.0)
+    nasdaq_prev = yf_data.get("nasdaq_prev", nasdaq)
+
+    # Nasdaq absolute point change (for Nifty correlation)
+    nasdaq_pts = round(nasdaq - nasdaq_prev, 2) if nasdaq_prev else 0.0
+
+    # Nasdaq → Nifty projected impact
+    # 100 pts up → Nifty +80 to +150 | 100 pts down → Nifty -100 to -200
+    if nasdaq_pts > 0:
+        nifty_impact_low  = round(nasdaq_pts * 0.80)
+        nifty_impact_high = round(nasdaq_pts * 1.50)
+        nasdaq_nifty_label = f"+{nifty_impact_low} to +{nifty_impact_high} pts"
+        nasdaq_nifty_color = "#22c55e"
+        nasdaq_nifty_signal = "Bullish for Nifty"
+    elif nasdaq_pts < 0:
+        nifty_impact_low  = round(nasdaq_pts * 1.00)
+        nifty_impact_high = round(nasdaq_pts * 2.00)
+        nasdaq_nifty_label = f"{nifty_impact_low} to {nifty_impact_high} pts"
+        nasdaq_nifty_color = "#ef4444"
+        nasdaq_nifty_signal = "Bearish for Nifty"
+    else:
+        nifty_impact_low  = 0
+        nifty_impact_high = 0
+        nasdaq_nifty_label = "Neutral"
+        nasdaq_nifty_color = "#94a3b8"
+        nasdaq_nifty_signal = "Neutral"
 
     # Phase 2: parallel GIFT + history fetches
     gift_task       = loop.run_in_executor(None, _fetch_gift_nifty, nifty)
@@ -587,6 +615,11 @@ async def _build_intel() -> Dict:
         "vix_chg_week": vix_hist.get("vix_chg_week"),
         "vix_chg_month": vix_hist.get("vix_chg_month"),
         "nifty": round(nifty, 2), "nifty_chg_pct": nifty_chg,
+        "nasdaq": round(nasdaq, 2), "nasdaq_chg_pct": nasdaq_chg,
+        "nasdaq_pts": nasdaq_pts,
+        "nasdaq_nifty_label": nasdaq_nifty_label,
+        "nasdaq_nifty_color": nasdaq_nifty_color,
+        "nasdaq_nifty_signal": nasdaq_nifty_signal,
         "gift_nifty": round(gift_nifty, 2), "gift_premium": gift_premium,
         "regulatory": regulatory,
         "vix_52w_high": vix_52w_high, "vix_52w_low": vix_52w_low,
